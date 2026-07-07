@@ -1,0 +1,23 @@
+/* Memory panel specific styles */
+.memory-table-wrapper {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.memory-row-highlight-write {
+  animation: pulse-yellow 1s ease-out;
+}
+
+.memory-row-highlight-read {
+  animation: pulse-blue 1s ease-out;
+}
+
+@keyframes pulse-yellow {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(250, 204, 21, 0.3); }
+}
+
+@keyframes pulse-blue {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(56, 189, 248, 0.25); }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "Multiplication via Repeated Addition",
+  "description": "Multiplies two numbers by adding one to itself N times.",
+  "variables": [
+    { "name": "x", "type": "WORD", "initial_value": 6 },
+    { "name": "y", "type": "WORD", "initial_value": 7 },
+    { "name": "product", "type": "DWORD", "initial_value": 0 }
+  ],
+  "instruction_lines": [
+    { "label": "main", "text": "LOAD R1, [x]" },
+    { "label": null, "text": "LOAD R2, [y]" },
+    { "label": null, "text": "MOV R3, 0" },
+    { "label": "loop", "text": "ADD R3, R1" },
+    { "label": null, "text": "DEC R2" },
+    { "label": null, "text": "JG loop" },
+    { "label": null, "text": "STORE [product], R3" },
+    { "label": null, "text": "HLT" }
+  ]
+}

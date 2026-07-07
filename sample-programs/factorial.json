@@ -1,0 +1,18 @@
+{
+  "name": "Factorial (n!)",
+  "description": "Computes n! using repeated multiplication. Input n in register R1.",
+  "variables": [
+    { "name": "n", "type": "WORD", "initial_value": 5 },
+    { "name": "result", "type": "DWORD", "initial_value": 1 },
+    { "name": "counter", "type": "WORD", "initial_value": 0 }
+  ],
+  "instruction_lines": [
+    { "label": "main", "text": "LOAD R1, [n]" },
+    { "label": null, "text": "LOAD R2, [result]" },
+    { "label": "loop", "text": "MUL R2, R1" },
+    { "label": null, "text": "DEC R1" },
+    { "label": null, "text": "JG loop" },
+    { "label": null, "text": "STORE [result], R2" },
+    { "label": null, "text": "HLT" }
+  ]
+}

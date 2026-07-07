@@ -1,0 +1,24 @@
+{
+  "name": "Array Sum",
+  "description": "Sums four values stored in memory (simulated array).",
+  "variables": [
+    { "name": "arr0", "type": "WORD", "initial_value": 10 },
+    { "name": "arr1", "type": "WORD", "initial_value": 20 },
+    { "name": "arr2", "type": "WORD", "initial_value": 30 },
+    { "name": "arr3", "type": "WORD", "initial_value": 40 },
+    { "name": "sum", "type": "DWORD", "initial_value": 0 }
+  ],
+  "instruction_lines": [
+    { "label": "main", "text": "MOV R1, 0" },
+    { "label": null, "text": "LOAD R2, [arr0]" },
+    { "label": null, "text": "ADD R1, R2" },
+    { "label": null, "text": "LOAD R2, [arr1]" },
+    { "label": null, "text": "ADD R1, R2" },
+    { "label": null, "text": "LOAD R2, [arr2]" },
+    { "label": null, "text": "ADD R1, R2" },
+    { "label": null, "text": "LOAD R2, [arr3]" },
+    { "label": null, "text": "ADD R1, R2" },
+    { "label": null, "text": "STORE [sum], R1" },
+    { "label": null, "text": "HLT" }
+  ]
+}

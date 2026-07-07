@@ -1,0 +1,23 @@
+{
+  "name": "Fibonacci Sequence",
+  "description": "Computes the first N Fibonacci numbers, storing each in result.",
+  "variables": [
+    { "name": "a", "type": "WORD", "initial_value": 0 },
+    { "name": "b", "type": "WORD", "initial_value": 1 },
+    { "name": "result", "type": "WORD", "initial_value": 0 },
+    { "name": "count", "type": "WORD", "initial_value": 8 }
+  ],
+  "instruction_lines": [
+    { "label": "main", "text": "LOAD R1, [a]" },
+    { "label": null, "text": "LOAD R2, [b]" },
+    { "label": null, "text": "LOAD R3, [count]" },
+    { "label": "loop", "text": "MOV R4, R1" },
+    { "label": null, "text": "ADD R4, R2" },
+    { "label": null, "text": "STORE [result], R4" },
+    { "label": null, "text": "MOV R1, R2" },
+    { "label": null, "text": "MOV R2, R4" },
+    { "label": null, "text": "DEC R3" },
+    { "label": null, "text": "JG loop" },
+    { "label": null, "text": "HLT" }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Simple Addition",
+  "description": "Loads two variables, adds them, and stores the result.",
+  "variables": [
+    { "name": "a", "type": "WORD", "initial_value": 15 },
+    { "name": "b", "type": "WORD", "initial_value": 27 },
+    { "name": "result", "type": "WORD", "initial_value": 0 }
+  ],
+  "instruction_lines": [
+    { "label": "main", "text": "LOAD R1, [a]" },
+    { "label": null, "text": "LOAD R2, [b]" },
+    { "label": null, "text": "ADD R1, R2" },
+    { "label": null, "text": "STORE [result], R1" },
+    { "label": null, "text": "HLT" }
+  ]
+}

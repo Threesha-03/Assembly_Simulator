@@ -1,0 +1,20 @@
+/* Simulation page layout */
+.simulation-page {
+  min-height: 100vh;
+  background: #0f172a;
+  padding: 2rem;
+}
+
+.simulation-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+@media (max-width: 1024px) {
+  .simulation-grid {
+    grid-template-columns: 1fr;
+  }
+}

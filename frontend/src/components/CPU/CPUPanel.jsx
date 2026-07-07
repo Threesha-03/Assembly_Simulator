@@ -118,17 +118,17 @@ export function CPUPanel() {
   const isCompleted = status === 'completed'
 
   return (
-    <div className="rounded-2xl border border-slate-700 bg-slate-900/80 backdrop-blur-xl shadow-2xl overflow-hidden flex flex-col">
+    <div className="h-full rounded-2xl border border-slate-700 bg-slate-900/80 backdrop-blur-xl shadow-2xl overflow-hidden flex flex-col">
 
       {/* ── Header ── */}
-      <div className="px-5 py-4 border-b border-slate-700 bg-slate-800/60">
+      <div className="flex-none px-5 py-3 border-b border-slate-700 bg-slate-800/60">
         <h2 className="text-sm font-bold tracking-widest text-slate-100 uppercase">CPU</h2>
       </div>
 
-      <div className="p-5 flex flex-col gap-4 flex-1">
+      <div className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-3">
 
         {/* ── Row 1: Start Address ── */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <label className="text-xs font-bold tracking-widest text-slate-400 uppercase w-28 shrink-0">
             Start Address
           </label>
@@ -137,9 +137,9 @@ export function CPUPanel() {
             type="text"
             value={startAddress}
             onChange={handleAddressChange}
-            placeholder="e.g. 1000H"
+            placeholder="e.g. 4000"
             className="
-              flex-1 min-w-0 px-3 py-2 rounded-lg
+              flex-1 min-w-0 px-3 py-1.5 rounded-lg
               bg-slate-800 border border-slate-600
               text-slate-100 font-mono text-sm
               placeholder-slate-500
@@ -150,24 +150,23 @@ export function CPUPanel() {
         </div>
 
         {/* ── Row 2: Instruction (IR) ── */}
-        <FieldRow
-          label="Instruction"
-          value={instructionRegister}
-          color="text-amber-400"
-          mono
-        />
+        <div className="shrink-0">
+          <FieldRow label="Instruction" value={instructionRegister} color="text-amber-400" mono />
+        </div>
 
         {/* ── Row 3: PC ── */}
-        <FieldRow
-          label="PC"
-          value={programCounter}
-          color="text-blue-400"
-          mono
-          title="Program Counter — address of next instruction to fetch"
-        />
+        <div className="shrink-0">
+          <FieldRow
+            label="PC"
+            value={programCounter}
+            color="text-blue-400"
+            mono
+            title="Program Counter — address of next instruction to fetch"
+          />
+        </div>
 
         {/* ── Row 4: Buttons ── */}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 shrink-0">
           <CpuButton
             onClick={handleRun}
             disabled={isRunning || isCompleted}
@@ -194,29 +193,31 @@ export function CPUPanel() {
         </div>
 
         {/* ── Registers + Accumulator ── */}
-        <div className="mt-1">
-          <h3 className="text-xs font-bold tracking-widest text-slate-500 uppercase mb-2">
+        <div className="flex-1 min-h-0 flex flex-col">
+          <h3 className="shrink-0 text-xs font-bold tracking-widest text-slate-500 uppercase mb-2">
             Registers
           </h3>
 
-          {/* Two-column register grid */}
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-            {/* Left: R1–R8 */}
-            <div className="space-y-1">
-              {leftRegs.map((reg) => (
-                <RegisterRow key={reg.name} reg={reg} />
-              ))}
-            </div>
-            {/* Right: R9–R15 */}
-            <div className="space-y-1">
-              {rightRegs.map((reg) => (
-                <RegisterRow key={reg.name} reg={reg} />
-              ))}
+          {/* Two-column register grid — scrollable */}
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+              {/* Left: R1–R8 */}
+              <div className="space-y-1">
+                {leftRegs.map((reg) => (
+                  <RegisterRow key={reg.name} reg={reg} />
+                ))}
+              </div>
+              {/* Right: R9–R15 */}
+              <div className="space-y-1">
+                {rightRegs.map((reg) => (
+                  <RegisterRow key={reg.name} reg={reg} />
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Accumulator spans full width below registers */}
-          <div className="mt-3 flex items-center justify-between px-3 py-2 rounded-lg bg-emerald-900/30 border border-emerald-700/50">
+          {/* Accumulator — fixed below registers */}
+          <div className="shrink-0 mt-3 flex items-center justify-between px-3 py-2 rounded-lg bg-emerald-900/30 border border-emerald-700/50">
             <span className="text-xs font-bold tracking-widest text-emerald-400 uppercase">
               Accumulator
             </span>
@@ -227,7 +228,9 @@ export function CPUPanel() {
         </div>
 
         {/* ── Status badge ── */}
-        <StatusBadge status={status} />
+        <div className="shrink-0">
+          <StatusBadge status={status} />
+        </div>
       </div>
     </div>
   )

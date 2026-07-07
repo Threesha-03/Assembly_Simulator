@@ -21,7 +21,7 @@ import {
   snapshotPushed,
   resetMemory,
 } from '../components/Memory/memorySlice'
-import { INSTRUCTION_MEMORY_BASE } from '../components/Memory/AddressGenerator'
+import { INSTRUCTION_MEMORY_BASE, INSTRUCTION_BYTE_SIZE } from '../components/Memory/AddressGenerator'
 
 const SimulationContext = createContext(null)
 
@@ -52,7 +52,7 @@ export function SimulationProvider({ children, variables = [], instructionLines 
     dispatch(snapshotPushed())
     setCurrentStep((prev) => {
       const next = prev + 1
-      dispatch(instructionPointerMoved({ address: INSTRUCTION_MEMORY_BASE + next }))
+      dispatch(instructionPointerMoved({ address: INSTRUCTION_MEMORY_BASE + next * INSTRUCTION_BYTE_SIZE }))
       dispatch(simulationStatusChanged('updating'))
       if (next >= instructionLines.length) {
         setIsCompleted(true)

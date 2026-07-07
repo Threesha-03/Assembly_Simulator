@@ -46,14 +46,14 @@ const DataMemoryRow = memo(DataMemoryRowImpl)
  */
 export function DataMemory({ rows }) {
   return (
-    <section aria-labelledby="data-memory-heading">
+    <section aria-labelledby="data-memory-heading" className="flex flex-col h-full overflow-hidden">
       <h3
         id="data-memory-heading"
-        className="px-4 pt-4 pb-2 text-xs font-bold tracking-widest text-slate-500 dark:text-slate-400 uppercase"
+        className="flex-none px-4 pt-3 pb-2 text-xs font-bold tracking-widest text-slate-500 dark:text-slate-400 uppercase"
       >
         Data Memory
       </h3>
-      <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200/70 dark:border-white/10 scroll-smooth">
+      <div className="flex-1 min-h-0 overflow-y-auto rounded-lg border border-slate-200/70 dark:border-white/10 scroll-smooth mx-4">
         <table className="w-full border-collapse text-sm">
           <thead className="sticky top-0 z-10 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm">
             <tr className="border-b border-slate-200 dark:border-white/10 text-left text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">

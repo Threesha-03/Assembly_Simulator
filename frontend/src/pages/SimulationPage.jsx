@@ -74,9 +74,9 @@ export function SimulationPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-6">
-      {/* Top bar */}
-      <div className="flex items-center justify-between mb-6 max-w-7xl mx-auto">
+    <div className="h-screen overflow-hidden bg-slate-950 text-slate-100 flex flex-col px-6 pt-4 pb-4">
+      {/* Top bar — fixed height */}
+      <div className="flex items-center justify-between mb-4 max-w-7xl mx-auto w-full shrink-0">
         <h1 className="text-xl font-bold text-slate-100">Assembly Simulator</h1>
         <div className="flex gap-3">
           <Button variant="ghost" onClick={() => navigate('/')}>
@@ -88,8 +88,8 @@ export function SimulationPage() {
         </div>
       </div>
 
-      {/* Main panels */}
-      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+      {/* Main panels — fill all remaining vertical space, no page scroll */}
+      <div className="max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 min-h-0">
         <MemoryPanel />
         <CPUPanel />
       </div>

@@ -12,11 +12,12 @@ export function Input({
   placeholder = '',
   disabled = false,
   className = '',
+  isLightMode = false,
 }) {
   return (
     <div className={`flex flex-col gap-1 ${className}`}>
       {label && (
-        <label htmlFor={id} className="text-xs font-medium text-slate-400">
+        <label htmlFor={id} className={`text-xs font-medium ${isLightMode ? 'text-slate-600' : 'text-slate-400'}`}>
           {label}
         </label>
       )}
@@ -27,13 +28,12 @@ export function Input({
         onChange={onChange}
         placeholder={placeholder}
         disabled={disabled}
-        className="
+        className={`
           px-3 py-2 rounded-lg text-sm
-          bg-slate-800 border border-slate-700
-          text-slate-100 placeholder-slate-500
+          ${isLightMode ? 'bg-white border border-slate-300 text-slate-800 placeholder-slate-400' : 'bg-slate-800 border border-slate-700 text-slate-100 placeholder-slate-500'}
           focus:outline-none focus:ring-2 focus:ring-blue-500
           disabled:opacity-40 disabled:cursor-not-allowed
-        "
+        `}
       />
     </div>
   )

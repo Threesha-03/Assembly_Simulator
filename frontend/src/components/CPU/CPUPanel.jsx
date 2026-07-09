@@ -27,6 +27,7 @@ import {
   stepNext,
   executeInstruction,
   reloadCPU,
+  previousInstruction,
   resetCPU,
 } from './cpuSlice'
 import { memoryWritten } from '../Memory/memorySlice'
@@ -62,12 +63,12 @@ function parseStoreValue(ir, registers, accumulator) {
 
 export function CPUPanel() {
   const dispatch = useDispatch()
-  const { registers, accumulator, programCounter, instructionRegister, startAddress, status } =
-    useCPU()
+  const { registers, programCounter, instructionRegister, startAddress, status } = useCPU()
 
   // Read instruction & data memory directly for execution
   const instructionMemory = useSelector((state) => state.memory.instructionMemory)
   const dataMemory = useSelector((state) => state.memory.dataMemory)
+  const hasHistory = useSelector((state) => state.cpu.history.length > 0)
 
   const inputRef = useRef(null)
 
@@ -91,12 +92,12 @@ export function CPUPanel() {
     }, 0)
   }
 
-  const handleReload = () => {
-    dispatch(reloadCPU({ instructionMemory }))
-    setTimeout(() => {
-      dispatch(executeInstruction({ dataMemory }))
-      checkStore()
-    }, 0)
+  const handlePrevious = () => {
+    dispatch(previousInstruction({ instructionMemory }))
+  }
+
+  const handleReset = () => {
+    dispatch(resetCPU({ instructionMemory, startAddress }))
   }
 
   // Write result back to data memory when a STORE instruction fires
@@ -110,26 +111,26 @@ export function CPUPanel() {
     dispatch(setStartAddress(e.target.value))
   }
 
-  // ── Register groups: R1–R8 left, R9–R15 right ────────────────────────────
-  const leftRegs = registers.slice(0, 8)   // R1–R8
-  const rightRegs = registers.slice(8, 15) // R9–R15
+  // ── Register groups: R0–R7 left, R8–R15 right ────────────────────────────
+  const leftRegs = registers.slice(0, 8)   // R0–R7
+  const rightRegs = registers.slice(8, 16) // R8–R15
 
   const isRunning = status === 'running'
   const isCompleted = status === 'completed'
 
   return (
-    <div className="h-full rounded-2xl border border-slate-700 bg-slate-900/80 backdrop-blur-xl shadow-2xl overflow-hidden flex flex-col">
+    <div className="h-full rounded-2xl border border-slate-200/70 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-[0_8px_30px_rgba(15,23,42,0.08)] dark:shadow-2xl overflow-hidden flex flex-col">
 
       {/* ── Header ── */}
-      <div className="flex-none px-5 py-3 border-b border-slate-700 bg-slate-800/60">
-        <h2 className="text-sm font-bold tracking-widest text-slate-100 uppercase">CPU</h2>
+      <div className="flex-none px-5 py-3 border-b border-slate-200/70 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-800/60">
+        <h2 className="text-sm font-bold tracking-widest text-slate-700 dark:text-slate-100 uppercase">CPU</h2>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-3">
 
         {/* ── Row 1: Start Address ── */}
         <div className="flex items-center gap-3 shrink-0">
-          <label className="text-xs font-bold tracking-widest text-slate-400 uppercase w-28 shrink-0">
+          <label className="text-xs font-bold tracking-widest text-slate-600 dark:text-slate-400 uppercase w-28 shrink-0">
             Start Address
           </label>
           <input
@@ -140,9 +141,10 @@ export function CPUPanel() {
             placeholder="e.g. 4000"
             className="
               flex-1 min-w-0 px-3 py-1.5 rounded-lg
-              bg-slate-800 border border-slate-600
-              text-slate-100 font-mono text-sm
-              placeholder-slate-500
+              bg-white border border-slate-300
+              text-slate-800 font-mono text-sm
+              placeholder-slate-400
+              dark:bg-slate-800 dark:border-slate-600 dark:text-slate-100 dark:placeholder-slate-500
               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
               transition-colors
             "
@@ -176,30 +178,36 @@ export function CPUPanel() {
           </CpuButton>
 
           <CpuButton
+            onClick={handlePrevious}
+            disabled={!hasHistory || !isRunning || isCompleted}
+            color="bg-blue-600 hover:bg-blue-700"
+          >
+            Previous
+          </CpuButton>
+
+          <CpuButton
             onClick={handleNext}
             disabled={!isRunning || isCompleted}
-            color="bg-blue-600 hover:bg-blue-700"
+            color="bg-yellow-500 hover:bg-yellow-600"
           >
             Next
           </CpuButton>
 
           <CpuButton
-            onClick={handleReload}
-            disabled={status === 'idle'}
-            color="bg-violet-600 hover:bg-violet-700"
+            onClick={handleReset}
+            color="bg-red-600 hover:bg-red-700"
           >
-            Reload
+            Reset
           </CpuButton>
         </div>
 
-        {/* ── Registers + Accumulator ── */}
+        {/* ── Registers ── */}
         <div className="flex-1 min-h-0 flex flex-col">
-          <h3 className="shrink-0 text-xs font-bold tracking-widest text-slate-500 uppercase mb-2">
+          <h3 className="shrink-0 text-xs font-bold tracking-widest text-slate-600 dark:text-slate-500 uppercase mb-2">
             Registers
           </h3>
 
-          {/* Two-column register grid — scrollable */}
-          <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+          <div className="flex-1 min-h-0 overflow-visible">
             <div className="grid grid-cols-2 gap-x-4 gap-y-1">
               {/* Left: R1–R8 */}
               <div className="space-y-1">
@@ -215,20 +223,13 @@ export function CPUPanel() {
               </div>
             </div>
           </div>
-
-          {/* Accumulator — fixed below registers */}
-          <div className="shrink-0 mt-3 flex items-center justify-between px-3 py-2 rounded-lg bg-emerald-900/30 border border-emerald-700/50">
-            <span className="text-xs font-bold tracking-widest text-emerald-400 uppercase">
-              Accumulator
-            </span>
-            <span className="font-mono font-semibold text-emerald-300 text-base">
-              {accumulator}
-            </span>
-          </div>
         </div>
 
         {/* ── Status badge ── */}
-        <div className="shrink-0">
+        <div className="shrink-0 flex items-center justify-end gap-2">
+          <span className="text-xs font-bold tracking-widest text-slate-600 dark:text-slate-400 uppercase">
+            Current Status:
+          </span>
           <StatusBadge status={status} />
         </div>
       </div>
@@ -242,9 +243,9 @@ function FieldRow({ label, value, color = 'text-slate-100', mono = false, title 
   return (
     <div
       title={title}
-      className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/50 border border-slate-700/60"
+      className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-50/80 border border-slate-200/70 dark:bg-slate-800/50 dark:border-slate-700/60"
     >
-      <span className="text-xs font-bold tracking-widest text-slate-400 uppercase shrink-0 w-28">
+      <span className="text-xs font-bold tracking-widest text-slate-600 dark:text-slate-400 uppercase shrink-0 w-28">
         {label}
       </span>
       <span
@@ -264,14 +265,14 @@ function RegisterRow({ reg }) {
     <div
       className={`flex items-center justify-between px-2 py-1 rounded-md text-xs border transition-colors ${
         isActive
-          ? 'bg-blue-900/30 border-blue-700/50'
-          : 'bg-slate-800/30 border-slate-700/30'
+          ? 'bg-blue-100 border-blue-200 text-blue-700 dark:bg-blue-900/30 dark:border-blue-700/50 dark:text-blue-300'
+          : 'bg-slate-100 border-slate-200 text-slate-600 dark:bg-slate-800/30 dark:border-slate-700/30 dark:text-slate-500'
       }`}
     >
-      <span className={`font-mono font-bold ${isActive ? 'text-blue-300' : 'text-slate-500'}`}>
+      <span className={`font-mono font-bold ${isActive ? 'text-blue-700 dark:text-blue-300' : 'text-slate-600 dark:text-slate-500'}`}>
         {reg.name}
       </span>
-      <span className={`font-mono ${isActive ? 'text-slate-100' : 'text-slate-500'}`}>
+      <span className={`font-mono ${isActive ? 'text-blue-700 dark:text-slate-100' : 'text-slate-600 dark:text-slate-500'}`}>
         {reg.value}
       </span>
     </div>
@@ -297,9 +298,9 @@ function CpuButton({ children, onClick, disabled, color }) {
 
 function StatusBadge({ status }) {
   const map = {
-    idle:      { label: 'Idle',      cls: 'bg-slate-700 text-slate-400' },
-    running:   { label: 'Running',   cls: 'bg-blue-700/60 text-blue-300' },
-    completed: { label: 'Completed', cls: 'bg-emerald-700/60 text-emerald-300' },
+    idle:      { label: 'Idle',      cls: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400' },
+    running:   { label: 'Running',   cls: 'bg-blue-100 text-blue-700 dark:bg-blue-700/60 dark:text-blue-300' },
+    completed: { label: 'Completed', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-700/60 dark:text-emerald-300' },
   }
   const { label, cls } = map[status] ?? map.idle
   return (

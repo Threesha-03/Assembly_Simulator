@@ -67,7 +67,7 @@ export function CodeMemory({ rows }) {
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={3} className="px-4 py-6 text-center text-sm text-slate-400">
-                  No instructions loaded — write some on the Home page.
+                  No instructions loaded - Load on the Home Page.
                 </td>
               </tr>
             ) : (

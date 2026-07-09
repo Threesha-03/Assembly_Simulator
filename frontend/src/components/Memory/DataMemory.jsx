@@ -66,7 +66,7 @@ export function DataMemory({ rows }) {
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={3} className="px-4 py-6 text-center text-sm text-slate-400">
-                  No variables declared yet — add some on the Home page.
+                  No variables declared yet - Declare on the Home Page.
                 </td>
               </tr>
             ) : (

@@ -60,7 +60,7 @@ export function MemoryPanel() {
       <div className="flex-none relative flex items-center gap-3 px-5 py-2">
         <div className="h-px flex-1 bg-gradient-to-r from-transparent via-slate-300 dark:via-white/20 to-transparent" />
         <span className="text-[10px] font-semibold tracking-[0.2em] text-slate-400 dark:text-slate-500 uppercase">
-          Memory Divider
+          
         </span>
         <div className="h-px flex-1 bg-gradient-to-r from-transparent via-slate-300 dark:via-white/20 to-transparent" />
       </div>

@@ -23,7 +23,18 @@ import { createSlice } from '@reduxjs/toolkit'
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeRegisters() {
-  return Array.from({ length: 15 }, (_, i) => ({ name: `R${i + 1}`, value: 0 }))
+  return Array.from({ length: 16 }, (_, i) => ({ name: `R${i}`, value: 0 }))
+}
+
+function snapshotState(state) {
+  return {
+    registers: state.registers.map((reg) => ({ ...reg })),
+    accumulator: state.accumulator,
+    programCounter: state.programCounter,
+    instructionRegister: state.instructionRegister,
+    startAddress: state.startAddress,
+    status: state.status,
+  }
 }
 
 // ─── Initial State ────────────────────────────────────────────────────────────
@@ -35,6 +46,7 @@ const initialState = {
   instructionRegister: '', // text of currently executing instruction
   startAddress: '',        // user-typed start address (e.g. "1000H" or "1000")
   status: 'idle',          // 'idle' | 'running' | 'completed'
+  history: [],             // snapshots of CPU state before each instruction execution
 }
 
 // ─── Slice ────────────────────────────────────────────────────────────────────
@@ -57,6 +69,7 @@ const cpuSlice = createSlice({
       const addr = parseAddress(startAddress ?? state.startAddress)
       if (addr === null) return
 
+      state.history = []
       const cell = instructionMemory[addr]
       state.instructionRegister = cell ? cell.instruction : '—'
       state.programCounter = addr + 1
@@ -93,6 +106,7 @@ const cpuSlice = createSlice({
       const ir = state.instructionRegister
       if (!ir || ir === '—' || ir === '(end)') return
 
+      state.history.push(snapshotState(state))
       applyInstruction(state, ir, dataMemory)
     },
 
@@ -106,8 +120,8 @@ const cpuSlice = createSlice({
     },
 
     /**
-     * Reload: restart from startAddress without changing registers/accumulator.
-     * Equivalent to pressing Run again from the same start address.
+     * Reload: restart from the start address with registers/accumulator reset.
+     * Equivalent to a fresh run from the beginning of the program.
      */
     reloadCPU(state, action) {
       const { instructionMemory } = action.payload ?? {}
@@ -116,19 +130,50 @@ const cpuSlice = createSlice({
         state.status = 'idle'
         return
       }
+      state.history = []
       const cell = instructionMemory ? instructionMemory[addr] : null
       state.instructionRegister = cell ? cell.instruction : '—'
       state.programCounter = addr + 1
       state.status = 'running'
     },
 
+    /** Restore the previous execution snapshot and step the PC back one position */
+    previousInstruction(state, action) {
+      if (!state.history.length) return
+
+      const snapshot = state.history.pop()
+      state.registers = snapshot.registers.map((reg) => ({ ...reg }))
+      state.accumulator = snapshot.accumulator
+      state.programCounter = snapshot.programCounter != null ? snapshot.programCounter - 1 : null
+      state.instructionRegister = snapshot.instructionRegister
+      state.status = snapshot.status
+      state.startAddress = snapshot.startAddress
+
+      const { instructionMemory } = action.payload ?? {}
+      if (instructionMemory && state.programCounter != null) {
+        const cell = instructionMemory[state.programCounter]
+        state.instructionRegister = cell ? cell.instruction : '—'
+      }
+    },
+
     /** Full reset including registers and accumulator */
-    resetCPU(state) {
+    resetCPU(state, action) {
+      const { instructionMemory = {}, startAddress: explicitStart } = action.payload ?? {}
+      const addr = parseAddress(explicitStart ?? state.startAddress)
       state.registers = makeRegisters()
       state.accumulator = 0
-      state.programCounter = null
-      state.instructionRegister = ''
-      state.status = 'idle'
+      state.history = []
+      if (addr === null) {
+        state.programCounter = null
+        state.instructionRegister = ''
+        state.status = 'idle'
+        return
+      }
+
+      const cell = instructionMemory ? instructionMemory[addr] : null
+      state.programCounter = addr + 1
+      state.instructionRegister = cell ? cell.instruction : '—'
+      state.status = 'running'
     },
 
     /** Directly set a register value (used by execution engine) */
@@ -291,6 +336,7 @@ export const {
   executeInstruction,
   storeResult,
   reloadCPU,
+  previousInstruction,
   resetCPU,
   setRegister,
   setAccumulator,

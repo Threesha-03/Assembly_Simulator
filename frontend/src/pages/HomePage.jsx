@@ -9,22 +9,41 @@
  * On submit, dispatches loadProgram to the memory slice and navigates.
  */
 
-import React, { useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useDispatch } from 'react-redux'
+import { useDispatch, useSelector } from 'react-redux'
 import { loadProgram } from '../components/Memory/memorySlice'
 import { DataRow } from '../components/Data/DataRow'
 import { Button } from '../components/Shared/Button'
-import { useData } from '../hooks/useData'
 import '../styles/home.css'
 
 export function HomePage() {
   const navigate = useNavigate()
   const dispatch = useDispatch()
   const [isLightMode, setIsLightMode] = useState(false)
-
-  const { variables, addVariable, updateVariable, removeVariable } = useData([])
+  const memoryState = useSelector((state) => state.memory)
+  const [variables, setVariables] = useState([])
   const [programText, setProgramText] = useState('')
+
+  useEffect(() => {
+    const existingVariables = (memoryState.variables ?? []).map((variable) => ({
+      ...variable,
+      name: variable.name ?? '',
+      type: variable.type ?? 'WORD',
+      initialValue: variable.initialValue ?? 0,
+    }))
+
+    const existingProgramText = (memoryState.instructionLines ?? [])
+      .map((line) => {
+        const label = line.label ? `${line.label}: ` : ''
+        return `${label}${line.text ?? ''}`.trim()
+      })
+      .filter(Boolean)
+      .join('\n')
+
+    setVariables(existingVariables.length > 0 ? existingVariables : [{ name: '', type: 'WORD', initialValue: 0 }])
+    setProgramText(existingProgramText)
+  }, [memoryState.variables, memoryState.instructionLines])
 
   const handleStart = () => {
     const validVariables = variables.filter((v) => v.name.trim() !== '')
@@ -42,6 +61,18 @@ export function HomePage() {
 
     dispatch(loadProgram({ variables: validVariables, instructionLines: lines }))
     navigate('/simulation')
+  }
+
+  const updateVariable = (index, field, value) => {
+    setVariables((prev) => prev.map((variable, currentIndex) => (currentIndex === index ? { ...variable, [field]: value } : variable)))
+  }
+
+  const addVariable = () => {
+    setVariables((prev) => [...prev, { name: '', type: 'WORD', initialValue: 0 }])
+  }
+
+  const removeVariable = (index) => {
+    setVariables((prev) => prev.filter((_, currentIndex) => currentIndex !== index))
   }
 
   const panelClass = isLightMode

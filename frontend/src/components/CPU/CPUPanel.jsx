@@ -108,12 +108,10 @@ export function CPUPanel() {
   }
 
   const handleReset = () => {
-    const addr = parseAddress(startAddress)
-    dispatch(resetCPU({ instructionMemory, startAddress }))
+    dispatch(resetCPU({ instructionMemory, startAddress: '' }))
     dispatch(resetMemory())
-    if (addr !== null) {
-      dispatch(instructionPointerMoved({ address: addr }))
-    }
+    dispatch(setStartAddress(''))
+    dispatch(instructionPointerMoved({ address: null }))
   }
 
   const persistStoreValue = (address, instructionText) => {

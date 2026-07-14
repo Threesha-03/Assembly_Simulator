@@ -159,6 +159,7 @@ const cpuSlice = createSlice({
       state.registers = makeRegisters()
       state.accumulator = 0
       state.history = []
+      state.startAddress = explicitStart ?? state.startAddress
       if (addr === null) {
         state.programCounter = null
         state.instructionRegister = ''
@@ -167,9 +168,12 @@ const cpuSlice = createSlice({
       }
 
       const cell = instructionMemory ? instructionMemory[addr] : null
-      state.programCounter = addr + INSTRUCTION_BYTE_SIZE
-      state.instructionRegister = cell ? cell.instruction : '—'
-      state.status = 'running'
+      state.programCounter = null
+      state.instructionRegister = ''
+      state.status = 'idle'
+      if (cell) {
+        state.instructionRegister = ''
+      }
     },
 
     /** Directly set a register value (used by execution engine) */

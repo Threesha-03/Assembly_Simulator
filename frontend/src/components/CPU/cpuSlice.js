@@ -19,6 +19,7 @@
  */
 
 import { createSlice } from '@reduxjs/toolkit'
+import { INSTRUCTION_BYTE_SIZE } from '../Memory/AddressGenerator.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -72,7 +73,7 @@ const cpuSlice = createSlice({
       state.history = []
       const cell = instructionMemory[addr]
       state.instructionRegister = cell ? cell.instruction : '—'
-      state.programCounter = addr + 1
+      state.programCounter = addr + INSTRUCTION_BYTE_SIZE
       state.status = 'running'
     },
 
@@ -93,7 +94,8 @@ const cpuSlice = createSlice({
         return
       }
       state.instructionRegister = cell.instruction
-      state.programCounter = pc + 1
+      state.programCounter = pc + INSTRUCTION_BYTE_SIZE
+      state.status = 'running'
     },
 
     /**
@@ -102,12 +104,12 @@ const cpuSlice = createSlice({
      * payload: { dataMemory: { [address]: { value, label } } }
      */
     executeInstruction(state, action) {
-      const { dataMemory = {} } = action.payload ?? {}
+      const { dataMemory = {}, instructionMemory = {} } = action.payload ?? {}
       const ir = state.instructionRegister
       if (!ir || ir === '—' || ir === '(end)') return
 
       state.history.push(snapshotState(state))
-      applyInstruction(state, ir, dataMemory)
+      applyInstruction(state, ir, dataMemory, instructionMemory)
     },
 
     /**
@@ -133,7 +135,7 @@ const cpuSlice = createSlice({
       state.history = []
       const cell = instructionMemory ? instructionMemory[addr] : null
       state.instructionRegister = cell ? cell.instruction : '—'
-      state.programCounter = addr + 1
+      state.programCounter = addr + INSTRUCTION_BYTE_SIZE
       state.status = 'running'
     },
 
@@ -144,16 +146,10 @@ const cpuSlice = createSlice({
       const snapshot = state.history.pop()
       state.registers = snapshot.registers.map((reg) => ({ ...reg }))
       state.accumulator = snapshot.accumulator
-      state.programCounter = snapshot.programCounter != null ? snapshot.programCounter - 1 : null
+      state.programCounter = snapshot.programCounter
       state.instructionRegister = snapshot.instructionRegister
       state.status = snapshot.status
       state.startAddress = snapshot.startAddress
-
-      const { instructionMemory } = action.payload ?? {}
-      if (instructionMemory && state.programCounter != null) {
-        const cell = instructionMemory[state.programCounter]
-        state.instructionRegister = cell ? cell.instruction : '—'
-      }
     },
 
     /** Full reset including registers and accumulator */
@@ -171,7 +167,7 @@ const cpuSlice = createSlice({
       }
 
       const cell = instructionMemory ? instructionMemory[addr] : null
-      state.programCounter = addr + 1
+      state.programCounter = addr + INSTRUCTION_BYTE_SIZE
       state.instructionRegister = cell ? cell.instruction : '—'
       state.status = 'running'
     },
@@ -219,22 +215,20 @@ export function parseAddress(str) {
  *   STORE [label], Rx | ACC
  *   MOV  ACC, Rx | imm
  *   HLT
- *   JMP  (no-op in step mode)
  */
-function applyInstruction(state, ir, dataMemory) {
-  const tokens = ir.replace(/[,\[\]]/g, ' ').trim().split(/\s+/)
+function applyInstruction(state, ir, dataMemory, instructionMemory) {
+  const instructionText = ir.trim().replace(/^\s*[A-Za-z_]\w*\s*:\s*/, '')
+  const tokens = instructionText.replace(/[.,\[\]]/g, ' ').trim().split(/\s+/)
   const op = tokens[0]?.toUpperCase()
 
   const getVal = (tok) => {
     if (!tok) return 0
     const t = tok.toUpperCase()
-    // Register?
     if (/^R(\d+)$/.test(t)) {
       const reg = state.registers.find((r) => r.name === t)
       return reg ? Number(reg.value) : 0
     }
     if (t === 'ACC') return Number(state.accumulator)
-    // Immediate?
     const n = Number(tok)
     return isNaN(n) ? 0 : n
   }
@@ -248,6 +242,19 @@ function applyInstruction(state, ir, dataMemory) {
     return Object.values(dataMemory).find(
       (cell) => cell.label?.toLowerCase() === label.toLowerCase()
     )
+  }
+
+  const findInstructionAddressByLabel = (label) => {
+    const cell = Object.values(instructionMemory).find(
+      (entry) => entry.label?.toLowerCase() === label.toLowerCase()
+    )
+    return cell ? cell.address : null
+  }
+
+  const setProgramCounter = (address) => {
+    if (typeof address === 'number') {
+      state.programCounter = address
+    }
   }
 
   switch (op) {
@@ -317,12 +324,50 @@ function applyInstruction(state, ir, dataMemory) {
       // via memorySlice.memoryWritten. Nothing to do to the CPU registers here.
       break
     }
+    case 'JMP': {
+      const target = tokens[1]
+      const address = findInstructionAddressByLabel(target)
+      if (address !== null) setProgramCounter(address)
+      break
+    }
+    case 'JE':
+    case 'JNE':
+    case 'JG':
+    case 'JL': {
+      const regToken = tokens[1]
+      let compareToken = tokens[2]
+      let target = tokens[3]
+
+      if (!target) {
+        // Support `JG R1 loop` as `JG R1, 0, loop`
+        target = compareToken
+        compareToken = '0'
+      }
+
+      const address = findInstructionAddressByLabel(target)
+      if (address === null) break
+
+      const regValue = getVal(regToken)
+      const compareValue = getVal(compareToken)
+      let shouldJump = false
+      switch (op) {
+        case 'JE': shouldJump = regValue === compareValue; break
+        case 'JNE': shouldJump = regValue !== compareValue; break
+        case 'JG': shouldJump = regValue > compareValue; break
+        case 'JL': shouldJump = regValue < compareValue; break
+        default: break
+      }
+      if (shouldJump) setProgramCounter(address)
+      break
+    }
+    case 'NOP': {
+      break
+    }
     case 'HLT': {
       state.status = 'completed'
       break
     }
     default:
-      // JMP, NOP, unknown — no register side-effects in step mode
       break
   }
 }

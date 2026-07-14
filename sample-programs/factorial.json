@@ -11,7 +11,7 @@
     { "label": null, "text": "LOAD R2, [result]" },
     { "label": "loop", "text": "MUL R2, R1" },
     { "label": null, "text": "DEC R1" },
-    { "label": null, "text": "JG loop" },
+    { "label": null, "text": "JG R1, 0, loop" },
     { "label": null, "text": "STORE [result], R2" },
     { "label": null, "text": "HLT" }
   ]

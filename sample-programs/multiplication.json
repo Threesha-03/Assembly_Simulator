@@ -12,7 +12,7 @@
     { "label": null, "text": "MOV R3, 0" },
     { "label": "loop", "text": "ADD R3, R1" },
     { "label": null, "text": "DEC R2" },
-    { "label": null, "text": "JG loop" },
+    { "label": null, "text": "JG R2, 0, loop" },
     { "label": null, "text": "STORE [product], R3" },
     { "label": null, "text": "HLT" }
   ]

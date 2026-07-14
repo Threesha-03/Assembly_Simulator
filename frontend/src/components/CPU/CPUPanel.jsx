@@ -20,17 +20,22 @@
  */
 
 import React, { useRef } from 'react'
-import { useDispatch, useSelector } from 'react-redux'
+import { useDispatch, useSelector, useStore } from 'react-redux'
 import {
   setStartAddress,
   runFromStart,
   stepNext,
   executeInstruction,
-  reloadCPU,
   previousInstruction,
   resetCPU,
 } from './cpuSlice'
-import { memoryWritten } from '../Memory/memorySlice'
+import {
+  instructionPointerMoved,
+  memoryWritten,
+  previousStep,
+  resetMemory,
+  snapshotPushed,
+} from '../Memory/memorySlice'
 import { useCPU } from '../../hooks/useCPU'
 import { parseAddress } from './cpuSlice'
 
@@ -63,6 +68,7 @@ function parseStoreValue(ir, registers, accumulator) {
 
 export function CPUPanel() {
   const dispatch = useDispatch()
+  const store = useStore()
   const { registers, programCounter, instructionRegister, startAddress, status } = useCPU()
 
   // Read instruction & data memory directly for execution
@@ -75,36 +81,66 @@ export function CPUPanel() {
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   const handleRun = () => {
+    const addr = parseAddress(startAddress)
+    if (addr === null) return
+
     dispatch(runFromStart({ instructionMemory, startAddress }))
-    // Execute the instruction that just loaded into IR
-    setTimeout(() => {
-      dispatch(executeInstruction({ dataMemory }))
-      // If it was a STORE, write to memory too
-      checkStore()
-    }, 0)
+    dispatch(instructionPointerMoved({ address: addr }))
+    dispatch(snapshotPushed())
+    dispatch(executeInstruction({ dataMemory, instructionMemory }))
+    persistStoreValue(addr, instructionMemory[addr]?.instruction)
   }
 
   const handleNext = () => {
+    const currentPc = parseAddress(programCounter)
+    if (currentPc === null) return
+
     dispatch(stepNext({ instructionMemory }))
-    setTimeout(() => {
-      dispatch(executeInstruction({ dataMemory }))
-      checkStore()
-    }, 0)
+    dispatch(instructionPointerMoved({ address: currentPc }))
+    dispatch(snapshotPushed())
+    dispatch(executeInstruction({ dataMemory, instructionMemory }))
+    persistStoreValue(currentPc, instructionMemory[currentPc]?.instruction)
   }
 
   const handlePrevious = () => {
     dispatch(previousInstruction({ instructionMemory }))
+    dispatch(previousStep())
   }
 
   const handleReset = () => {
+    const addr = parseAddress(startAddress)
     dispatch(resetCPU({ instructionMemory, startAddress }))
+    dispatch(resetMemory())
+    if (addr !== null) {
+      dispatch(instructionPointerMoved({ address: addr }))
+    }
   }
 
-  // Write result back to data memory when a STORE instruction fires
-  const checkStore = () => {
-    // We read after dispatch so we use a selector callback form isn't available here.
-    // Instead we re-read from the latest state via a store subscription in SimulationPage.
-    // Here we schedule a micro-task so the slice has settled first.
+  const persistStoreValue = (address, instructionText) => {
+    if (!instructionText || !instructionText.trim().toUpperCase().startsWith('STORE')) return
+
+    const cpuState = store.getState().cpu
+    const labelMatch = instructionText.match(/STORE\s+\[([^\]]+)\]/i)
+    const srcMatch = instructionText.match(/STORE\s+\[[^\]]+\]\s*,\s*(\S+)/i)
+    if (!labelMatch) return
+
+    const label = labelMatch[1]
+    const srcToken = srcMatch ? srcMatch[1].toUpperCase() : 'ACC'
+    let value
+    if (srcToken === 'ACC') {
+      value = cpuState.accumulator
+    } else {
+      const reg = cpuState.registers.find((entry) => entry.name === srcToken)
+      value = reg ? reg.value : cpuState.accumulator
+    }
+
+    const cell = Object.values(dataMemory).find(
+      (entry) => entry.label?.toLowerCase() === label.toLowerCase()
+    )
+
+    if (cell) {
+      dispatch(memoryWritten({ address: cell.address, value }))
+    }
   }
 
   const handleAddressChange = (e) => {

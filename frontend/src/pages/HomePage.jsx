@@ -14,10 +14,8 @@ import { useNavigate } from 'react-router-dom'
 import { useDispatch } from 'react-redux'
 import { loadProgram } from '../components/Memory/memorySlice'
 import { DataRow } from '../components/Data/DataRow'
-import { InstructionRow } from '../components/Instruction/InstructionRow'
 import { Button } from '../components/Shared/Button'
 import { useData } from '../hooks/useData'
-import { useInstruction } from '../hooks/useInstruction'
 import '../styles/home.css'
 
 export function HomePage() {
@@ -26,12 +24,23 @@ export function HomePage() {
   const [isLightMode, setIsLightMode] = useState(false)
 
   const { variables, addVariable, updateVariable, removeVariable } = useData([])
-  const { instructions, addInstruction, updateInstruction, removeInstruction } = useInstruction([])
+  const [programText, setProgramText] = useState('')
 
   const handleStart = () => {
     const validVariables = variables.filter((v) => v.name.trim() !== '')
-    const validInstructions = instructions.filter((i) => i.text.trim() !== '')
-    dispatch(loadProgram({ variables: validVariables, instructionLines: validInstructions }))
+    const lines = programText
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => {
+        const match = line.match(/^([A-Za-z_]\w*):\s*(.*)$/)
+        if (match) {
+          return { label: match[1], text: match[2] }
+        }
+        return { label: null, text: line }
+      })
+
+    dispatch(loadProgram({ variables: validVariables, instructionLines: lines }))
     navigate('/simulation')
   }
 
@@ -92,20 +101,17 @@ export function HomePage() {
             <h2 className={`text-lg font-semibold ${headingClass}`}>
               Instruction Panel - Program
             </h2>
-            <Button onClick={addInstruction} variant={isLightMode ? 'secondary' : 'ghost'}>
-              + Add Instruction
-            </Button>
           </div>
-          <div className="space-y-2">
-            {instructions.map((instruction, idx) => (
-              <InstructionRow
-                key={idx}
-                instruction={instruction}
-                onChange={(field, value) => updateInstruction(idx, field, value)}
-                onRemove={() => removeInstruction(idx)}
-                isLightMode={isLightMode}
-              />
-            ))}
+          <div className="relative">
+            <textarea
+              value={programText}
+              onChange={(e) => setProgramText(e.target.value)}
+              placeholder="Write your assembly program here..."
+              className="w-full min-h-[320px] resize-none rounded-xl border border-slate-700 bg-slate-950/90 p-4 font-mono text-sm text-slate-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            />
+            <div className="pointer-events-none absolute right-4 top-4 text-xs text-slate-400">
+              Line editor
+            </div>
           </div>
         </section>
 

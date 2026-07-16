@@ -7,7 +7,7 @@
 
 import { useState, useCallback } from 'react'
 
-const DEFAULT_VARIABLE = () => ({ name: '', type: 'WORD', initialValue: 0 })
+const DEFAULT_VARIABLE = () => ({ name: '', type: 'int', initialValue: 0 })
 
 export function useData(initialVariables = []) {
   const [variables, setVariables] = useState(

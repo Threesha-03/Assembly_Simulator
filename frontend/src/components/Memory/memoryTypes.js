@@ -2,7 +2,7 @@
  * memoryTypes.js — shared types for Memory components.
  */
 
-export const DATA_TYPES = ['BYTE', 'WORD', 'DWORD', 'QWORD']
+export const DATA_TYPES = ['int', 'float', 'double', 'boolean']
 export const VIEW_MODES = ['decimal', 'hexadecimal', 'binary']
 export const MEMORY_STATUSES = ['ready', 'executing', 'updating', 'completed']
 

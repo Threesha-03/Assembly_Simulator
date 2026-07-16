@@ -4,10 +4,10 @@ import { Dropdown } from '../Shared/Dropdown'
 import { Button } from '../Shared/Button'
 
 const TYPE_OPTIONS = [
-  { value: 'BYTE', label: 'BYTE (1 byte)' },
-  { value: 'WORD', label: 'WORD (2 bytes)' },
-  { value: 'DWORD', label: 'DWORD (4 bytes)' },
-  { value: 'QWORD', label: 'QWORD (8 bytes)' },
+  { value: 'int', label: 'int (4 bytes)' },
+  { value: 'float', label: 'float (4 bytes)' },
+  { value: 'double', label: 'double (8 bytes)' },
+  { value: 'boolean', label: 'boolean (1 byte)' },
 ]
 
 /**

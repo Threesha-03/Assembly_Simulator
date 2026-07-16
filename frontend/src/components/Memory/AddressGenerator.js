@@ -11,10 +11,10 @@ export const INSTRUCTION_MEMORY_BASE = 4000
 export const INSTRUCTION_BYTE_SIZE = 8
 
 export const TYPE_BYTE_SIZE = {
-  BYTE: 1,
-  WORD: 4,
-  DWORD: 4,
-  QWORD: 8,
+  int: 4,
+  float: 4,
+  double: 8,
+  boolean: 1,
 }
 
 export function byteSizeForType(type) {

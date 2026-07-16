@@ -29,7 +29,7 @@ export function HomePage() {
     const existingVariables = (memoryState.variables ?? []).map((variable) => ({
       ...variable,
       name: variable.name ?? '',
-      type: variable.type ?? 'WORD',
+      type: variable.type ?? 'int',
       initialValue: variable.initialValue ?? 0,
     }))
 
@@ -41,7 +41,7 @@ export function HomePage() {
       .filter(Boolean)
       .join('\n')
 
-    setVariables(existingVariables.length > 0 ? existingVariables : [{ name: '', type: 'WORD', initialValue: 0 }])
+    setVariables(existingVariables.length > 0 ? existingVariables : [{ name: '', type: 'int', initialValue: 0 }])
     setProgramText(existingProgramText)
   }, [memoryState.variables, memoryState.instructionLines])
 
@@ -68,7 +68,7 @@ export function HomePage() {
   }
 
   const addVariable = () => {
-    setVariables((prev) => [...prev, { name: '', type: 'WORD', initialValue: 0 }])
+    setVariables((prev) => [...prev, { name: '', type: 'int', initialValue: 0 }])
   }
 
   const removeVariable = (index) => {

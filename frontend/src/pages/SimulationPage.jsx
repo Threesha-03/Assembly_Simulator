@@ -1,20 +1,15 @@
 /**
  * SimulationPage.jsx
  *
- * The main simulation view (page 2).
- * Layout:
- *   – top bar with title + navigation
- *   – two-column grid: Memory Panel (left) | CPU Panel (right)
+ * The main simulation view.
+ * Layout: top bar | Memory Panel (left) | CPU Panel (right)
  *
- * The CPU Panel is self-contained and owns Run / Next / Reload controls.
- * This page handles one cross-slice side-effect:
- *   When a STORE instruction executes, write the result back to data memory
- *   via memorySlice.memoryWritten.
+ * CPUPanel handles all interaction with the backend execution API.
+ * MemoryPanel displays state received from API responses via Redux.
  */
 
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useDispatch } from 'react-redux'
 import { MemoryPanel } from '../components/Memory/MemoryPanel'
 import { CPUPanel } from '../components/CPU/CPUPanel'
 import { Button } from '../components/Shared/Button'
@@ -22,7 +17,6 @@ import '../styles/simulation.css'
 
 export function SimulationPage() {
   const navigate = useNavigate()
-  const dispatch = useDispatch()
 
   const toggleDarkMode = () => {
     document.documentElement.classList.toggle('dark')

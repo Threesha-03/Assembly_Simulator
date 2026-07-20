@@ -1,34 +1,25 @@
 /**
- * memorySlice.js
+ * memorySlice.js — Display-only Redux slice for memory state.
  *
- * Redux Toolkit slice owning all state the Memory Panel renders.
+ * All allocation and mutation logic has moved to the backend.
+ * This slice receives memory state from API responses and stores it for rendering.
  *
- * INTEGRATION CONTRACT:
- *   1. Dispatch `loadProgram({ variables, instructionLines })` when the user
- *      starts the simulation — this is the only place addresses are computed.
- *   2. The CPU Engine dispatches via the Memory Manager:
- *        - memoryWritten({ address, value })      — STORE / memory-write ops
- *        - memoryRead({ address })                — LOAD / memory-read ops
- *        - instructionPointerMoved({ address })   — when PC advances
- *        - simulationStatusChanged(status)        — status indicator
- *        - snapshotPushed()                       — after each instruction completes
+ * Actions:
+ *   setMemoryState(payload)  — set data + instruction memory from backend response
+ *   setCurrentInstruction(addr) — highlight the current instruction row
+ *   setStatus(status)        — update display status badge
+ *   resetMemoryDisplay()     — clear all display state
  */
 
 import { createSlice } from '@reduxjs/toolkit'
-import { allocateProgramMemory } from './AddressGenerator'
 
 const initialState = {
-  variables: [],
-  instructionLines: [],
-  dataMemory: {},
-  instructionMemory: {},
-  lastWrittenAddresses: [],
-  lastReadAddresses: [],
+  dataMemory: {},          // { [address]: { address, label, type, value } }
+  instructionMemory: {},   // { [address]: { address, label, instruction } }
   currentInstructionAddress: null,
+  lastWrittenAddress: null,
   viewMode: 'decimal',
   status: 'ready',
-  history: [],
-  initialSnapshot: null,
 }
 
 function toRecord(cells) {
@@ -37,106 +28,49 @@ function toRecord(cells) {
   return record
 }
 
-function captureSnapshot(state) {
-  return {
-    dataMemory: JSON.parse(JSON.stringify(state.dataMemory)),
-    instructionMemory: JSON.parse(JSON.stringify(state.instructionMemory)),
-    variables: JSON.parse(JSON.stringify(state.variables)),
-    instructionLines: JSON.parse(JSON.stringify(state.instructionLines)),
-  }
-}
-
-function applySnapshot(state, snapshot) {
-  state.dataMemory = snapshot.dataMemory
-  state.instructionMemory = snapshot.instructionMemory
-  state.variables = snapshot.variables
-  state.instructionLines = snapshot.instructionLines
-}
-
 const memorySlice = createSlice({
   name: 'memory',
   initialState,
   reducers: {
-    loadProgram(state, action) {
-      const { variables, instructionLines } = action.payload
-      const { instructionMemory, dataMemory } = allocateProgramMemory(instructionLines, variables)
-      state.variables = variables
-      state.instructionLines = instructionLines
-      state.dataMemory = toRecord(dataMemory)
-      state.instructionMemory = toRecord(instructionMemory)
-      state.lastWrittenAddresses = []
-      state.lastReadAddresses = []
-      state.currentInstructionAddress = null
-      state.status = 'ready'
-      state.history = []
-      state.initialSnapshot = captureSnapshot(state)
+    /**
+     * Apply memory arrays returned by the backend.
+     * payload: { data_memory: [...], instruction_memory: [...] }
+     */
+    setMemoryState(state, action) {
+      const { data_memory, instruction_memory } = action.payload
+      if (data_memory)        state.dataMemory = toRecord(data_memory)
+      if (instruction_memory) state.instructionMemory = toRecord(instruction_memory)
     },
 
-    memoryWritten(state, action) {
-      const { address, value } = action.payload
-      const cell = state.dataMemory[address]
-      if (cell) cell.value = value
-      state.lastWrittenAddresses = [address]
-      state.lastReadAddresses = []
+    setCurrentInstruction(state, action) {
+      state.currentInstructionAddress = action.payload
     },
 
-    memoryRead(state, action) {
-      state.lastReadAddresses = [action.payload.address]
-      state.lastWrittenAddresses = []
+    setLastWrittenAddress(state, action) {
+      state.lastWrittenAddress = action.payload
     },
 
-    instructionPointerMoved(state, action) {
-      state.currentInstructionAddress = action.payload.address
-    },
-
-    simulationStatusChanged(state, action) {
+    setStatus(state, action) {
       state.status = action.payload
-    },
-
-    snapshotPushed(state) {
-      state.history.push(captureSnapshot(state))
-    },
-
-    previousStep(state) {
-      const snapshot = state.history.pop()
-      if (snapshot) {
-        applySnapshot(state, snapshot)
-        state.lastWrittenAddresses = []
-        state.lastReadAddresses = []
-      }
-    },
-
-    resetMemory(state) {
-      if (state.initialSnapshot) applySnapshot(state, state.initialSnapshot)
-      state.lastWrittenAddresses = []
-      state.lastReadAddresses = []
-      state.currentInstructionAddress = null
-      state.status = 'ready'
-      state.history = []
     },
 
     setViewMode(state, action) {
       state.viewMode = action.payload
     },
 
-    highlightsCleared(state) {
-      state.lastWrittenAddresses = []
-      state.lastReadAddresses = []
+    resetMemoryDisplay(state) {
+      return { ...initialState }
     },
   },
 })
 
 export const {
-  loadProgram,
-  memoryWritten,
-  memoryRead,
-  instructionPointerMoved,
-  simulationStatusChanged,
-  snapshotPushed,
-  previousStep,
-  resetMemory,
+  setMemoryState,
+  setCurrentInstruction,
+  setLastWrittenAddress,
+  setStatus,
   setViewMode,
-  highlightsCleared,
+  resetMemoryDisplay,
 } = memorySlice.actions
 
 export default memorySlice.reducer

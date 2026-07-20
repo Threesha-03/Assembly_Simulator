@@ -1,143 +1,134 @@
 /**
  * CPUPanel.jsx
  *
- * Self-contained CPU block for the Simulation page.
+ * CPU control panel — all execution logic is handled by the backend.
+ * This component calls the API and updates Redux display state with the response.
  *
  * Controls:
- *   Start Address — user enters the memory address to begin execution from
- *   Run           — loads instruction at Start Address into IR; PC → next address
- *   Next          — loads instruction at PC into IR; PC advances by 1
- *   Reload        — restarts from Start Address (IR ← start instr, PC ← start+1)
+ *   Start Address — hex/decimal address where execution begins
+ *   Run           — POST /api/cpu/run  → execute first instruction
+ *   Next          — POST /api/cpu/step → execute next instruction
+ *   Previous      — POST /api/cpu/previous → undo last step
+ *   Reset         — POST /api/cpu/reset → full reset
  *
- * Displays:
- *   Instruction   — the instruction currently being executed (IR)
- *   PC            — memory address of the NEXT instruction to fetch
- *   R1–R15        — general-purpose register values
- *   Accumulator   — result accumulator
- *
- * On a STORE instruction the result is also written back to data memory
- * via the memorySlice.memoryWritten action.
+ * Displays: IR, PC, R0–R15, Accumulator, Status
  */
 
-import React, { useRef } from 'react'
-import { useDispatch, useSelector, useStore } from 'react-redux'
-import {
-  setStartAddress,
-  runFromStart,
-  stepNext,
-  executeInstruction,
-  previousInstruction,
-  resetCPU,
-} from './cpuSlice'
-import {
-  instructionPointerMoved,
-  memoryWritten,
-  previousStep,
-  resetMemory,
-  snapshotPushed,
-} from '../Memory/memorySlice'
+import React, { useState } from 'react'
+import { useDispatch } from 'react-redux'
+import { setCPUState, setStartAddress, setError } from './cpuSlice'
+import { setMemoryState, setCurrentInstruction, setStatus, setLastWrittenAddress } from '../Memory/memorySlice'
 import { useCPU } from '../../hooks/useCPU'
-import { parseAddress } from './cpuSlice'
+import {
+  runExecution,
+  stepExecution,
+  previousStep,
+  resetExecution,
+} from '../../services/cpuApi'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Find the data-memory address for a label reference in a STORE/LOAD instruction */
-function findAddressByLabel(dataMemory, label) {
-  return Object.values(dataMemory).find(
-    (cell) => cell.label?.toLowerCase() === label?.toLowerCase()
+/**
+ * Apply a backend response to Redux: update CPU + memory display state.
+ * Backend returns the full simulation state on every call.
+ */
+function applyBackendState(dispatch, state) {
+  dispatch(setCPUState(state))
+  dispatch(setMemoryState({
+    data_memory: state.data_memory,
+    instruction_memory: state.instruction_memory,
+  }))
+  dispatch(setCurrentInstruction(state.program_counter))
+  // Map backend status to memory panel display status
+  const memStatus = state.status === 'running' ? 'executing'
+                  : state.status === 'idle'    ? 'ready'
+                  : state.status               // 'completed'
+  dispatch(setStatus(memStatus))
+}
+
+/** Highlight the data memory cell that was just written by a STORE instruction. */
+function updateWriteHighlight(dispatch, state) {
+  const ir = state.instruction_register ?? ''
+  if (!ir.trim().toUpperCase().startsWith('STORE')) {
+    dispatch(setLastWrittenAddress(null))
+    return
+  }
+  const match = ir.match(/STORE\s+\[([^\]]+)\]/i)
+  if (!match) return
+  const label = match[1]
+  const cell = (state.data_memory ?? []).find(
+    (c) => c.label?.toLowerCase() === label.toLowerCase()
   )
-}
-
-/** Pull the destination label from "STORE [label], Rx" */
-function parseStoreLabel(ir) {
-  const match = ir?.match(/STORE\s+\[([^\]]+)\]/i)
-  return match ? match[1] : null
-}
-
-/** Pull source value from "STORE [label], Rx|ACC" given current registers & acc */
-function parseStoreValue(ir, registers, accumulator) {
-  const match = ir?.match(/STORE\s+\[[^\]]+\]\s*,\s*(\S+)/i)
-  if (!match) return accumulator
-  const src = match[1].toUpperCase()
-  if (src === 'ACC') return accumulator
-  const reg = registers.find((r) => r.name === src)
-  return reg ? reg.value : accumulator
+  if (cell) dispatch(setLastWrittenAddress(cell.address))
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function CPUPanel() {
   const dispatch = useDispatch()
-  const store = useStore()
-  const { registers, programCounter, instructionRegister, startAddress, status } = useCPU()
+  const { registers, programCounter, instructionRegister, startAddress, status, canGoBack, error } = useCPU()
+  const [loading, setLoading] = useState(false)
 
-  // Read instruction & data memory directly for execution
-  const instructionMemory = useSelector((state) => state.memory.instructionMemory)
-  const dataMemory = useSelector((state) => state.memory.dataMemory)
-  const hasHistory = useSelector((state) => state.cpu.history.length > 0)
-
-  const inputRef = useRef(null)
+  const isRunning   = status === 'running'
+  const isCompleted = status === 'completed'
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
-  const handleRun = () => {
-    const addr = parseAddress(startAddress)
-    if (addr === null) return
-
-    dispatch(runFromStart({ instructionMemory, startAddress }))
-    dispatch(instructionPointerMoved({ address: addr }))
-    dispatch(snapshotPushed())
-    dispatch(executeInstruction({ dataMemory, instructionMemory }))
-    persistStoreValue(addr, instructionMemory[addr]?.instruction)
-  }
-
-  const handleNext = () => {
-    const currentPc = parseAddress(programCounter)
-    if (currentPc === null) return
-
-    dispatch(stepNext({ instructionMemory }))
-    dispatch(instructionPointerMoved({ address: currentPc }))
-    dispatch(snapshotPushed())
-    dispatch(executeInstruction({ dataMemory, instructionMemory }))
-    persistStoreValue(currentPc, instructionMemory[currentPc]?.instruction)
-  }
-
-  const handlePrevious = () => {
-    dispatch(previousInstruction({ instructionMemory }))
-    dispatch(previousStep())
-  }
-
-  const handleReset = () => {
-    dispatch(resetCPU({ instructionMemory, startAddress: '' }))
-    dispatch(resetMemory())
-    dispatch(setStartAddress(''))
-    dispatch(instructionPointerMoved({ address: null }))
-  }
-
-  const persistStoreValue = (address, instructionText) => {
-    if (!instructionText || !instructionText.trim().toUpperCase().startsWith('STORE')) return
-
-    const cpuState = store.getState().cpu
-    const labelMatch = instructionText.match(/STORE\s+\[([^\]]+)\]/i)
-    const srcMatch = instructionText.match(/STORE\s+\[[^\]]+\]\s*,\s*(\S+)/i)
-    if (!labelMatch) return
-
-    const label = labelMatch[1]
-    const srcToken = srcMatch ? srcMatch[1].toUpperCase() : 'ACC'
-    let value
-    if (srcToken === 'ACC') {
-      value = cpuState.accumulator
-    } else {
-      const reg = cpuState.registers.find((entry) => entry.name === srcToken)
-      value = reg ? reg.value : cpuState.accumulator
+  const handleRun = async () => {
+    if (!startAddress.trim()) return
+    setLoading(true)
+    try {
+      const state = await runExecution(startAddress)
+      applyBackendState(dispatch, state)
+      updateWriteHighlight(dispatch, state)
+    } catch (e) {
+      dispatch(setError(e.message))
+    } finally {
+      setLoading(false)
     }
+  }
 
-    const cell = Object.values(dataMemory).find(
-      (entry) => entry.label?.toLowerCase() === label.toLowerCase()
-    )
+  const handleNext = async () => {
+    if (!isRunning) return
+    setLoading(true)
+    try {
+      const state = await stepExecution()
+      applyBackendState(dispatch, state)
+      updateWriteHighlight(dispatch, state)
+    } catch (e) {
+      dispatch(setError(e.message))
+    } finally {
+      setLoading(false)
+    }
+  }
 
-    if (cell) {
-      dispatch(memoryWritten({ address: cell.address, value }))
+  const handlePrevious = async () => {
+    setLoading(true)
+    try {
+      const state = await previousStep()
+      applyBackendState(dispatch, state)
+      dispatch(setLastWrittenAddress(null))
+    } catch (e) {
+      dispatch(setError(e.message))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleReset = async () => {
+    setLoading(true)
+    try {
+      const state = await resetExecution()
+      // Apply full state (restores initial memory values)
+      applyBackendState(dispatch, state)
+      // Clear the start address input and the written-address highlight
+      dispatch(setStartAddress(''))
+      dispatch(setLastWrittenAddress(null))
+      dispatch(setCurrentInstruction(null))
+    } catch (e) {
+      dispatch(setError(e.message))
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -145,52 +136,47 @@ export function CPUPanel() {
     dispatch(setStartAddress(e.target.value))
   }
 
-  // ── Register groups: R0–R7 left, R8–R15 right ────────────────────────────
-  const leftRegs = registers.slice(0, 8)   // R0–R7
-  const rightRegs = registers.slice(8, 16) // R8–R15
-
-  const isRunning = status === 'running'
-  const isCompleted = status === 'completed'
+  // ── Register split: R0–R7 left, R8–R15 right ─────────────────────────────
+  const leftRegs  = registers.slice(0, 8)
+  const rightRegs = registers.slice(8, 16)
 
   return (
     <div className="h-full rounded-2xl border border-slate-200/70 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-[0_8px_30px_rgba(15,23,42,0.08)] dark:shadow-2xl overflow-hidden flex flex-col">
 
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="flex-none px-5 py-3 border-b border-slate-200/70 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-800/60">
         <h2 className="text-sm font-bold tracking-widest text-slate-700 dark:text-slate-100 uppercase">CPU</h2>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-3">
 
-        {/* ── Row 1: Start Address ── */}
+        {/* Error banner */}
+        {error && (
+          <div className="px-3 py-2 rounded-lg bg-red-100 border border-red-300 text-red-700 text-xs dark:bg-red-900/30 dark:border-red-700/50 dark:text-red-300">
+            {error}
+          </div>
+        )}
+
+        {/* Start Address */}
         <div className="flex items-center gap-3 shrink-0">
           <label className="text-xs font-bold tracking-widest text-slate-600 dark:text-slate-400 uppercase w-28 shrink-0">
             Start Address
           </label>
           <input
-            ref={inputRef}
             type="text"
             value={startAddress}
             onChange={handleAddressChange}
             placeholder="e.g. 4000"
-            className="
-              flex-1 min-w-0 px-3 py-1.5 rounded-lg
-              bg-white border border-slate-300
-              text-slate-800 font-mono text-sm
-              placeholder-slate-400
-              dark:bg-slate-800 dark:border-slate-600 dark:text-slate-100 dark:placeholder-slate-500
-              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
-              transition-colors
-            "
+            className="flex-1 min-w-0 px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-800 font-mono text-sm placeholder-slate-400 dark:bg-slate-800 dark:border-slate-600 dark:text-slate-100 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
           />
         </div>
 
-        {/* ── Row 2: Instruction (IR) ── */}
+        {/* Instruction Register */}
         <div className="shrink-0">
           <FieldRow label="Instruction" value={instructionRegister} color="text-amber-400" mono />
         </div>
 
-        {/* ── Row 3: PC ── */}
+        {/* Program Counter */}
         <div className="shrink-0">
           <FieldRow
             label="PC"
@@ -201,11 +187,11 @@ export function CPUPanel() {
           />
         </div>
 
-        {/* ── Row 4: Buttons ── */}
+        {/* Control Buttons */}
         <div className="flex flex-wrap gap-2 shrink-0">
           <CpuButton
             onClick={handleRun}
-            disabled={isRunning || isCompleted}
+            disabled={loading || isRunning || isCompleted}
             color="bg-green-600 hover:bg-green-700"
           >
             Run
@@ -213,7 +199,7 @@ export function CPUPanel() {
 
           <CpuButton
             onClick={handlePrevious}
-            disabled={!hasHistory || !isRunning || isCompleted}
+            disabled={loading || !canGoBack}
             color="bg-blue-600 hover:bg-blue-700"
           >
             Previous
@@ -221,7 +207,7 @@ export function CPUPanel() {
 
           <CpuButton
             onClick={handleNext}
-            disabled={!isRunning || isCompleted}
+            disabled={loading || !isRunning || isCompleted}
             color="bg-yellow-500 hover:bg-yellow-600"
           >
             Next
@@ -229,40 +215,32 @@ export function CPUPanel() {
 
           <CpuButton
             onClick={handleReset}
+            disabled={loading}
             color="bg-red-600 hover:bg-red-700"
           >
             Reset
           </CpuButton>
         </div>
 
-        {/* ── Registers ── */}
+        {/* Registers */}
         <div className="flex-1 min-h-0 flex flex-col">
           <h3 className="shrink-0 text-xs font-bold tracking-widest text-slate-600 dark:text-slate-500 uppercase mb-2">
             Registers
           </h3>
-
-          <div className="flex-1 min-h-0 overflow-visible">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-              {/* Left: R1–R8 */}
-              <div className="space-y-1">
-                {leftRegs.map((reg) => (
-                  <RegisterRow key={reg.name} reg={reg} />
-                ))}
-              </div>
-              {/* Right: R9–R15 */}
-              <div className="space-y-1">
-                {rightRegs.map((reg) => (
-                  <RegisterRow key={reg.name} reg={reg} />
-                ))}
-              </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <div className="space-y-1">
+              {leftRegs.map((reg) => <RegisterRow key={reg.name} reg={reg} />)}
+            </div>
+            <div className="space-y-1">
+              {rightRegs.map((reg) => <RegisterRow key={reg.name} reg={reg} />)}
             </div>
           </div>
         </div>
 
-        {/* ── Status badge ── */}
+        {/* Status */}
         <div className="shrink-0 flex items-center justify-end gap-2">
           <span className="text-xs font-bold tracking-widest text-slate-600 dark:text-slate-400 uppercase">
-            Current Status:
+            Status:
           </span>
           <StatusBadge status={status} />
         </div>
@@ -282,11 +260,7 @@ function FieldRow({ label, value, color = 'text-slate-100', mono = false, title 
       <span className="text-xs font-bold tracking-widest text-slate-600 dark:text-slate-400 uppercase shrink-0 w-28">
         {label}
       </span>
-      <span
-        className={`font-semibold text-sm truncate max-w-xs text-right ${color} ${
-          mono ? 'font-mono' : ''
-        }`}
-      >
+      <span className={`font-semibold text-sm truncate max-w-xs text-right ${color} ${mono ? 'font-mono' : ''}`}>
         {value || '—'}
       </span>
     </div>
@@ -319,11 +293,7 @@ function CpuButton({ children, onClick, disabled, color }) {
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`
-        px-4 py-2 rounded-lg font-semibold text-sm text-white
-        transition-colors disabled:opacity-40 disabled:cursor-not-allowed
-        ${color}
-      `}
+      className={`px-4 py-2 rounded-lg font-semibold text-sm text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${color}`}
     >
       {children}
     </button>
@@ -338,11 +308,9 @@ function StatusBadge({ status }) {
   }
   const { label, cls } = map[status] ?? map.idle
   return (
-    <div className="flex justify-end">
-      <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase ${cls}`}>
-        {label}
-      </span>
-    </div>
+    <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase ${cls}`}>
+      {label}
+    </span>
   )
 }
 

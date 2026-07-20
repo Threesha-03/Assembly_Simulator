@@ -2,16 +2,16 @@
 variable.py — Variable data model.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
-DataType = Literal["BYTE", "WORD", "DWORD", "QWORD"]
+DataType = Literal["int", "float", "double", "boolean"]
 
 TYPE_BYTE_SIZE: dict[str, int] = {
-    "BYTE": 1,
-    "WORD": 2,
-    "DWORD": 4,
-    "QWORD": 8,
+    "int": 4,
+    "float": 4,
+    "double": 8,
+    "boolean": 1,
 }
 
 

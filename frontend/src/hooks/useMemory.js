@@ -1,92 +1,61 @@
 /**
- * useMemory.js
- *
- * Hook that reads derived memory state from Redux and exposes formatted rows,
- * stats, and dispatchable user-facing actions (view switch, previous, reset).
- *
- * Used by MemoryPanel, DataMemory, CodeMemory, and DataTable/InstructionTable.
+ * useMemory.js — Hook that reads memory display state from Redux.
+ * State is populated by API calls made in CPUPanel and HomePage.
  */
 
 import { useCallback, useMemo } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import {
-  setViewMode as setViewModeAction,
-  previousStep as previousStepAction,
-  resetMemory as resetMemoryAction,
-  highlightsCleared as highlightsClearedAction,
-} from '../components/Memory/memorySlice'
+import { setViewMode as setViewModeAction, resetMemoryDisplay } from '../components/Memory/memorySlice'
 import { formatValue } from '../components/Memory/valueFormat'
-import { formatAddress } from '../components/Memory/AddressGenerator'
 
-// ─── Selectors ────────────────────────────────────────────────────────────────
-
-function selectMemory(state) {
-  return state.memory
+function formatAddress(address) {
+  return String(address)
 }
-
-function getDataMemoryRows(memory) {
-  return Object.values(memory.dataMemory).sort((a, b) => a.address - b.address)
-}
-
-function getInstructionMemoryRows(memory) {
-  return Object.values(memory.instructionMemory).sort((a, b) => a.address - b.address)
-}
-
-function getMemoryStats(memory) {
-  const totalInstructions = Object.keys(memory.instructionMemory).length
-  const totalVariables = Object.keys(memory.dataMemory).length
-  const dataAddresses = Object.values(memory.dataMemory)
-  const lastDataAddress = dataAddresses.length
-    ? Math.max(...dataAddresses.map((c) => c.address))
-    : null
-  const instructionAddresses = Object.keys(memory.instructionMemory).length
-  const totalBytesUsed =
-    lastDataAddress !== null
-      ? lastDataAddress -
-        Math.min(...Object.values(memory.instructionMemory).map((c) => c.address), lastDataAddress) +
-        1
-      : instructionAddresses
-  return { totalInstructions, totalVariables, totalBytesUsed }
-}
-
-// ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useMemory() {
   const dispatch = useDispatch()
-  const memory = useSelector(selectMemory)
+  const memory = useSelector((state) => state.memory)
 
   const dataRows = useMemo(
     () =>
-      getDataMemoryRows(memory).map((cell) => ({
-        address: cell.address,
-        addressLabel: formatAddress(cell.address),
-        label: cell.label,
-        type: cell.type,
-        displayValue: formatValue(cell.value, cell.type, memory.viewMode),
-        isWritten: memory.lastWrittenAddresses.includes(cell.address),
-        isRead: memory.lastReadAddresses.includes(cell.address),
-      })),
+      Object.values(memory.dataMemory)
+        .sort((a, b) => a.address - b.address)
+        .map((cell) => ({
+          address: cell.address,
+          addressLabel: formatAddress(cell.address),
+          label: cell.label,
+          type: cell.type,
+          displayValue: formatValue(cell.value, cell.type, memory.viewMode),
+          isWritten: memory.lastWrittenAddress === cell.address,
+          isRead: false,
+        })),
     [memory]
   )
 
   const instructionRows = useMemo(
     () =>
-      getInstructionMemoryRows(memory).map((cell) => ({
-        address: cell.address,
-        addressLabel: formatAddress(cell.address),
-        label: cell.label,
-        instruction: cell.instruction,
-        isCurrent: memory.currentInstructionAddress === cell.address,
-      })),
+      Object.values(memory.instructionMemory)
+        .sort((a, b) => a.address - b.address)
+        .map((cell) => ({
+          address: cell.address,
+          addressLabel: formatAddress(cell.address),
+          label: cell.label,
+          instruction: cell.instruction,
+          isCurrent: memory.currentInstructionAddress === cell.address,
+        })),
     [memory]
   )
 
-  const stats = useMemo(() => getMemoryStats(memory), [memory])
+  const stats = useMemo(() => ({
+    totalInstructions: Object.keys(memory.instructionMemory).length,
+    totalVariables: Object.keys(memory.dataMemory).length,
+    totalBytesUsed:
+      Object.keys(memory.instructionMemory).length +
+      Object.keys(memory.dataMemory).length,
+  }), [memory])
 
   const setViewMode = useCallback((mode) => dispatch(setViewModeAction(mode)), [dispatch])
-  const goToPreviousStep = useCallback(() => dispatch(previousStepAction()), [dispatch])
-  const reset = useCallback(() => dispatch(resetMemoryAction()), [dispatch])
-  const clearHighlights = useCallback(() => dispatch(highlightsClearedAction()), [dispatch])
+  const reset = useCallback(() => dispatch(resetMemoryDisplay()), [dispatch])
 
   return {
     dataRows,
@@ -94,11 +63,8 @@ export function useMemory() {
     stats,
     viewMode: memory.viewMode,
     status: memory.status,
-    canGoBack: memory.history.length > 0,
     setViewMode,
-    goToPreviousStep,
     reset,
-    clearHighlights,
   }
 }
 

@@ -1,94 +1,25 @@
 /**
  * SimulationContext.jsx
  *
- * Provides simulation-wide state that doesn't live in Redux:
- * - current step index
- * - running/paused/completed flags
- * - start / step / pause / reset handlers
- *
- * Redux-managed state (memory, CPU registers, etc.) continues to live in
- * the Redux store; this context handles transient UI-level simulation control.
+ * Thin context wrapper — simulation control now lives entirely in the backend.
+ * This context is kept for any components that may consume useSimulation(),
+ * but is no longer responsible for execution logic.
  */
 
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
-import { useDispatch } from 'react-redux'
-import {
-  loadProgram,
-  memoryWritten,
-  memoryRead,
-  instructionPointerMoved,
-  simulationStatusChanged,
-  snapshotPushed,
-  resetMemory,
-} from '../components/Memory/memorySlice'
-import { INSTRUCTION_MEMORY_BASE, INSTRUCTION_BYTE_SIZE } from '../components/Memory/AddressGenerator'
+import React, { createContext, useContext } from 'react'
 
 const SimulationContext = createContext(null)
 
-export function SimulationProvider({ children, variables = [], instructionLines = [] }) {
-  const dispatch = useDispatch()
-  const [isRunning, setIsRunning] = useState(false)
-  const [isCompleted, setIsCompleted] = useState(false)
-  const [currentStep, setCurrentStep] = useState(0)
-
-  // Load program whenever variables/instructions change
-  useEffect(() => {
-    if (variables.length > 0 || instructionLines.length > 0) {
-      dispatch(loadProgram({ variables, instructionLines }))
-      dispatch(instructionPointerMoved({ address: INSTRUCTION_MEMORY_BASE }))
-    }
-  }, [dispatch, variables, instructionLines])
-
-  const start = useCallback(() => {
-    setIsRunning(true)
-    setIsCompleted(false)
-    setCurrentStep(0)
-    dispatch(simulationStatusChanged('executing'))
-    dispatch(instructionPointerMoved({ address: INSTRUCTION_MEMORY_BASE }))
-  }, [dispatch])
-
-  const step = useCallback(() => {
-    if (!isRunning || isCompleted) return
-    dispatch(snapshotPushed())
-    setCurrentStep((prev) => {
-      const next = prev + 1
-      dispatch(instructionPointerMoved({ address: INSTRUCTION_MEMORY_BASE + next * INSTRUCTION_BYTE_SIZE }))
-      dispatch(simulationStatusChanged('updating'))
-      if (next >= instructionLines.length) {
-        setIsCompleted(true)
-        setIsRunning(false)
-        dispatch(simulationStatusChanged('completed'))
-      }
-      return next
-    })
-  }, [dispatch, isRunning, isCompleted, instructionLines.length])
-
-  const pause = useCallback(() => {
-    setIsRunning(false)
-    dispatch(simulationStatusChanged('ready'))
-  }, [dispatch])
-
-  const reset = useCallback(() => {
-    setIsRunning(false)
-    setIsCompleted(false)
-    setCurrentStep(0)
-    dispatch(resetMemory())
-    dispatch(instructionPointerMoved({ address: INSTRUCTION_MEMORY_BASE }))
-  }, [dispatch])
-
+export function SimulationProvider({ children }) {
   return (
-    <SimulationContext.Provider
-      value={{ isRunning, isCompleted, currentStep, start, step, pause, reset }}
-    >
+    <SimulationContext.Provider value={{}}>
       {children}
     </SimulationContext.Provider>
   )
 }
 
 export function useSimulation() {
-  const ctx = useContext(SimulationContext)
-  if (!ctx) throw new Error('useSimulation must be used within SimulationProvider')
-  return ctx
+  return useContext(SimulationContext) ?? {}
 }
 
 export default SimulationContext

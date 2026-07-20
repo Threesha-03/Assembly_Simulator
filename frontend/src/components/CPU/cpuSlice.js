@@ -1,394 +1,66 @@
 /**
- * cpuSlice.js
+ * cpuSlice.js — Display-only Redux slice for CPU state.
  *
- * Redux Toolkit slice owning all CPU execution state:
- *   - registers R1–R15
- *   - accumulator
- *   - programCounter (PC)
- *   - instructionRegister (IR) — the instruction currently executing
- *   - startAddress — user-supplied entry point
- *   - status: 'idle' | 'running' | 'completed'
+ * All execution logic has moved to the backend (Python/FastAPI).
+ * This slice receives state from API responses and stores it for rendering.
  *
- * The simulation page drives this slice by:
- *   1. setStartAddress(addr)        — when user types a start address
- *   2. runFromStart(instructionMemory) — loads IR from startAddress, sets PC to next
- *   3. stepNext(instructionMemory)  — loads IR from PC, advances PC
- *   4. executeInstruction(instr, dataMemory) — updates registers / accumulator based on IR
- *   5. storeResult({ address, value }) — writes final result back (STORE instruction)
- *   6. reloadCPU()                  — resets back to startAddress state
+ * Actions:
+ *   setCPUState(state)   — update all CPU fields from a backend response
+ *   setStartAddress(str) — track user-typed start address input
+ *   resetCPUDisplay()    — clear back to initial display state
  */
 
 import { createSlice } from '@reduxjs/toolkit'
-import { INSTRUCTION_BYTE_SIZE } from '../Memory/AddressGenerator.js'
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeRegisters() {
   return Array.from({ length: 16 }, (_, i) => ({ name: `R${i}`, value: 0 }))
 }
 
-function snapshotState(state) {
-  return {
-    registers: state.registers.map((reg) => ({ ...reg })),
-    accumulator: state.accumulator,
-    programCounter: state.programCounter,
-    instructionRegister: state.instructionRegister,
-    startAddress: state.startAddress,
-    status: state.status,
-  }
-}
-
-// ─── Initial State ────────────────────────────────────────────────────────────
-
 const initialState = {
   registers: makeRegisters(),
   accumulator: 0,
-  programCounter: null,   // numeric address of NEXT instruction to fetch
-  instructionRegister: '', // text of currently executing instruction
-  startAddress: '',        // user-typed start address (e.g. "1000H" or "1000")
+  programCounter: null,
+  instructionRegister: '',
+  startAddress: '',
   status: 'idle',          // 'idle' | 'running' | 'completed'
-  history: [],             // snapshots of CPU state before each instruction execution
+  canGoBack: false,
+  error: null,
 }
-
-// ─── Slice ────────────────────────────────────────────────────────────────────
 
 const cpuSlice = createSlice({
   name: 'cpu',
   initialState,
   reducers: {
-    /** User types a start address in the input field */
+    /**
+     * Apply a full state object returned by the backend.
+     * Shape: { registers, accumulator, program_counter, instruction_register,
+     *          start_address, status, can_go_back }
+     */
+    setCPUState(state, action) {
+      const s = action.payload
+      if (s.registers)             state.registers = s.registers
+      if (s.accumulator !== undefined) state.accumulator = s.accumulator
+      if (s.program_counter !== undefined) state.programCounter = s.program_counter
+      if (s.instruction_register !== undefined) state.instructionRegister = s.instruction_register ?? ''
+      if (s.start_address !== undefined) state.startAddress = s.start_address ?? state.startAddress
+      if (s.status)                state.status = s.status
+      if (s.can_go_back !== undefined) state.canGoBack = s.can_go_back
+      state.error = null
+    },
+
     setStartAddress(state, action) {
       state.startAddress = action.payload
     },
 
-    /**
-     * Run: load instruction at startAddress into IR, set PC to startAddress + 1.
-     * payload: { instructionMemory: { [address]: { instruction, address } } }
-     */
-    runFromStart(state, action) {
-      const { instructionMemory, startAddress } = action.payload
-      const addr = parseAddress(startAddress ?? state.startAddress)
-      if (addr === null) return
-
-      state.history = []
-      const cell = instructionMemory[addr]
-      state.instructionRegister = cell ? cell.instruction : '—'
-      state.programCounter = addr + INSTRUCTION_BYTE_SIZE
-      state.status = 'running'
+    setError(state, action) {
+      state.error = action.payload
     },
 
-    /**
-     * Next: load instruction at current PC into IR, advance PC by 1.
-     * payload: { instructionMemory }
-     */
-    stepNext(state, action) {
-      const { instructionMemory } = action.payload
-      const pc = state.programCounter
-      if (pc === null) return
-
-      const cell = instructionMemory[pc]
-      if (!cell) {
-        // No instruction at this address — end of program
-        state.instructionRegister = '(end)'
-        state.status = 'completed'
-        return
-      }
-      state.instructionRegister = cell.instruction
-      state.programCounter = pc + INSTRUCTION_BYTE_SIZE
-      state.status = 'running'
-    },
-
-    /**
-     * Execute the current instruction register value.
-     * Updates registers and accumulator based on simple instruction parsing.
-     * payload: { dataMemory: { [address]: { value, label } } }
-     */
-    executeInstruction(state, action) {
-      const { dataMemory = {}, instructionMemory = {} } = action.payload ?? {}
-      const ir = state.instructionRegister
-      if (!ir || ir === '—' || ir === '(end)') return
-
-      state.history.push(snapshotState(state))
-      applyInstruction(state, ir, dataMemory, instructionMemory)
-    },
-
-    /**
-     * STORE: write accumulator/register value back to a data memory cell.
-     * This is handled by memorySlice (memoryWritten), but we record it here too.
-     */
-    storeResult(state, action) {
-      // payload: { address, value } — informational for the CPU panel
-      // Actual memory write goes via memorySlice.memoryWritten
-    },
-
-    /**
-     * Reload: restart from the start address with registers/accumulator reset.
-     * Equivalent to a fresh run from the beginning of the program.
-     */
-    reloadCPU(state, action) {
-      const { instructionMemory } = action.payload ?? {}
-      const addr = parseAddress(state.startAddress)
-      if (addr === null) {
-        state.status = 'idle'
-        return
-      }
-      state.history = []
-      const cell = instructionMemory ? instructionMemory[addr] : null
-      state.instructionRegister = cell ? cell.instruction : '—'
-      state.programCounter = addr + INSTRUCTION_BYTE_SIZE
-      state.status = 'running'
-    },
-
-    /** Restore the previous execution snapshot and step the PC back one position */
-    previousInstruction(state, action) {
-      if (!state.history.length) return
-
-      const snapshot = state.history.pop()
-      state.registers = snapshot.registers.map((reg) => ({ ...reg }))
-      state.accumulator = snapshot.accumulator
-      state.programCounter = snapshot.programCounter
-      state.instructionRegister = snapshot.instructionRegister
-      state.status = snapshot.status
-      state.startAddress = snapshot.startAddress
-    },
-
-    /** Full reset including registers and accumulator */
-    resetCPU(state, action) {
-      const { instructionMemory = {}, startAddress: explicitStart } = action.payload ?? {}
-      const addr = parseAddress(explicitStart ?? state.startAddress)
-      state.registers = makeRegisters()
-      state.accumulator = 0
-      state.history = []
-      state.startAddress = explicitStart ?? state.startAddress
-      if (addr === null) {
-        state.programCounter = null
-        state.instructionRegister = ''
-        state.status = 'idle'
-        return
-      }
-
-      const cell = instructionMemory ? instructionMemory[addr] : null
-      state.programCounter = null
-      state.instructionRegister = ''
-      state.status = 'idle'
-      if (cell) {
-        state.instructionRegister = ''
-      }
-    },
-
-    /** Directly set a register value (used by execution engine) */
-    setRegister(state, action) {
-      const { name, value } = action.payload
-      const reg = state.registers.find((r) => r.name === name.toUpperCase())
-      if (reg) reg.value = value
-    },
-
-    /** Directly set accumulator */
-    setAccumulator(state, action) {
-      state.accumulator = action.payload
+    resetCPUDisplay(state) {
+      return { ...initialState, startAddress: state.startAddress }
     },
   },
 })
 
-// ─── Instruction Execution Logic ──────────────────────────────────────────────
-
-/**
- * Parse address from string like "1000H", "0x1000", or "1000".
- * Returns a numeric address or null if invalid.
- */
-export function parseAddress(str) {
-  if (str == null || str === '') return null
-  const s = str.trim().toUpperCase()
-  if (s.endsWith('H')) return parseInt(s.slice(0, -1), 16) || null
-  if (s.startsWith('0X')) return parseInt(s.slice(2), 16) || null
-  const n = parseInt(s, 10)
-  return isNaN(n) ? null : n
-}
-
-/**
- * Very lightweight instruction interpreter.
- * Supports the subset used in the sample program:
- *   MOV  Rx, imm | Ry
- *   LOAD Rx, [label]
- *   ADD  Rx, Ry | imm
- *   SUB  Rx, Ry | imm
- *   MUL  Rx, Ry | imm
- *   DIV  Rx, Ry | imm
- *   INC  Rx
- *   DEC  Rx
- *   STORE [label], Rx | ACC
- *   MOV  ACC, Rx | imm
- *   HLT
- */
-function applyInstruction(state, ir, dataMemory, instructionMemory) {
-  const instructionText = ir.trim().replace(/^\s*[A-Za-z_]\w*\s*:\s*/, '')
-  const tokens = instructionText.replace(/[.,\[\]]/g, ' ').trim().split(/\s+/)
-  const op = tokens[0]?.toUpperCase()
-
-  const getVal = (tok) => {
-    if (!tok) return 0
-    const t = tok.toUpperCase()
-    if (/^R(\d+)$/.test(t)) {
-      const reg = state.registers.find((r) => r.name === t)
-      return reg ? Number(reg.value) : 0
-    }
-    if (t === 'ACC') return Number(state.accumulator)
-    const n = Number(tok)
-    return isNaN(n) ? 0 : n
-  }
-
-  const setReg = (name, value) => {
-    const reg = state.registers.find((r) => r.name === name.toUpperCase())
-    if (reg) reg.value = value
-  }
-
-  const findDataByLabel = (label) => {
-    return Object.values(dataMemory).find(
-      (cell) => cell.label?.toLowerCase() === label.toLowerCase()
-    )
-  }
-
-  const findInstructionAddressByLabel = (label) => {
-    const cell = Object.values(instructionMemory).find(
-      (entry) => entry.label?.toLowerCase() === label.toLowerCase()
-    )
-    return cell ? cell.address : null
-  }
-
-  const setProgramCounter = (address) => {
-    if (typeof address === 'number') {
-      state.programCounter = address
-    }
-  }
-
-  switch (op) {
-    case 'MOV': {
-      const dest = tokens[1]?.toUpperCase()
-      const src = tokens[2]
-      if (dest === 'ACC') {
-        state.accumulator = getVal(src)
-      } else if (/^R\d+$/.test(dest)) {
-        setReg(dest, getVal(src))
-      }
-      break
-    }
-    case 'LOAD': {
-      const dest = tokens[1]?.toUpperCase()
-      const label = tokens[2]
-      const cell = findDataByLabel(label)
-      const val = cell ? Number(cell.value) : 0
-      if (dest === 'ACC') state.accumulator = val
-      else if (/^R\d+$/.test(dest)) setReg(dest, val)
-      break
-    }
-    case 'ADD': {
-      const dest = tokens[1]?.toUpperCase()
-      const result = getVal(tokens[1]) + getVal(tokens[2])
-      if (dest === 'ACC') state.accumulator = result
-      else if (/^R\d+$/.test(dest)) setReg(dest, result)
-      else state.accumulator += getVal(tokens[1])
-      break
-    }
-    case 'SUB': {
-      const dest = tokens[1]?.toUpperCase()
-      const result = getVal(tokens[1]) - getVal(tokens[2])
-      if (dest === 'ACC') state.accumulator = result
-      else if (/^R\d+$/.test(dest)) setReg(dest, result)
-      break
-    }
-    case 'MUL': {
-      const dest = tokens[1]?.toUpperCase()
-      const result = getVal(tokens[1]) * getVal(tokens[2])
-      if (dest === 'ACC') state.accumulator = result
-      else if (/^R\d+$/.test(dest)) setReg(dest, result)
-      break
-    }
-    case 'DIV': {
-      const dest = tokens[1]?.toUpperCase()
-      const divisor = getVal(tokens[2])
-      const result = divisor !== 0 ? Math.floor(getVal(tokens[1]) / divisor) : 0
-      if (dest === 'ACC') state.accumulator = result
-      else if (/^R\d+$/.test(dest)) setReg(dest, result)
-      break
-    }
-    case 'INC': {
-      const dest = tokens[1]?.toUpperCase()
-      if (dest === 'ACC') state.accumulator += 1
-      else if (/^R\d+$/.test(dest)) setReg(dest, getVal(tokens[1]) + 1)
-      break
-    }
-    case 'DEC': {
-      const dest = tokens[1]?.toUpperCase()
-      if (dest === 'ACC') state.accumulator -= 1
-      else if (/^R\d+$/.test(dest)) setReg(dest, getVal(tokens[1]) - 1)
-      break
-    }
-    case 'STORE': {
-      // STORE [label], Rx — the actual memory write is dispatched by SimulationPage
-      // via memorySlice.memoryWritten. Nothing to do to the CPU registers here.
-      break
-    }
-    case 'JMP': {
-      const target = tokens[1]
-      const address = findInstructionAddressByLabel(target)
-      if (address !== null) setProgramCounter(address)
-      break
-    }
-    case 'JE':
-    case 'JNE':
-    case 'JG':
-    case 'JL': {
-      const regToken = tokens[1]
-      let compareToken = tokens[2]
-      let target = tokens[3]
-
-      if (!target) {
-        // Support `JG R1 loop` as `JG R1, 0, loop`
-        target = compareToken
-        compareToken = '0'
-      }
-
-      const address = findInstructionAddressByLabel(target)
-      if (address === null) break
-
-      const regValue = getVal(regToken)
-      const compareValue = getVal(compareToken)
-      let shouldJump = false
-      switch (op) {
-        case 'JE': shouldJump = regValue === compareValue; break
-        case 'JNE': shouldJump = regValue !== compareValue; break
-        case 'JG': shouldJump = regValue > compareValue; break
-        case 'JL': shouldJump = regValue < compareValue; break
-        default: break
-      }
-      if (shouldJump) setProgramCounter(address)
-      break
-    }
-    case 'NOP': {
-      break
-    }
-    case 'HLT': {
-      state.status = 'completed'
-      break
-    }
-    default:
-      break
-  }
-}
-
-// ─── Exports ──────────────────────────────────────────────────────────────────
-
-export const {
-  setStartAddress,
-  runFromStart,
-  stepNext,
-  executeInstruction,
-  storeResult,
-  reloadCPU,
-  previousInstruction,
-  resetCPU,
-  setRegister,
-  setAccumulator,
-} = cpuSlice.actions
-
+export const { setCPUState, setStartAddress, setError, resetCPUDisplay } = cpuSlice.actions
 export default cpuSlice.reducer

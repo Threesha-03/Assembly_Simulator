@@ -1,18 +1,22 @@
 /**
  * HomePage.jsx
  *
- * The landing page where the user:
- *   1. Declares variables (Data Panel) via DataRow inputs
- *   2. Writes instructions (Instruction Panel) via InstructionRow inputs
- *   3. Clicks "Start Simulation" to navigate to SimulationPage
+ * Landing page — user declares variables and writes instructions,
+ * then clicks "Start Simulation".
  *
- * On submit, dispatches loadProgram to the memory slice and navigates.
+ * On submit:
+ *   1. Calls POST /api/instructions/load  (backend allocates memory)
+ *   2. Backend returns full state (instruction_memory + data_memory)
+ *   3. Redux memory slice is updated for display
+ *   4. Navigate to /simulation
  */
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
-import { loadProgram } from '../components/Memory/memorySlice'
+import { setMemoryState, setStatus } from '../components/Memory/memorySlice'
+import { resetCPUDisplay } from '../components/CPU/cpuSlice'
+import { loadProgram } from '../services/instructionApi'
 import { DataRow } from '../components/Data/DataRow'
 import { Button } from '../components/Shared/Button'
 import '../styles/home.css'
@@ -21,50 +25,76 @@ export function HomePage() {
   const navigate = useNavigate()
   const dispatch = useDispatch()
   const [isLightMode, setIsLightMode] = useState(false)
-  const memoryState = useSelector((state) => state.memory)
-  const [variables, setVariables] = useState([])
+  const [variables, setVariables] = useState([{ name: '', type: 'int', initialValue: 0 }])
   const [programText, setProgramText] = useState('')
+  const [error, setError] = useState(null)
+  const [loading, setLoading] = useState(false)
 
+  // Restore form state if user navigates back from simulation
+  const memoryState = useSelector((state) => state.memory)
   useEffect(() => {
-    const existingVariables = (memoryState.variables ?? []).map((variable) => ({
-      ...variable,
-      name: variable.name ?? '',
-      type: variable.type ?? 'int',
-      initialValue: variable.initialValue ?? 0,
+    const existingVars = Object.values(memoryState.dataMemory).map((cell) => ({
+      name: cell.label ?? '',
+      type: cell.type ?? 'int',
+      initialValue: cell.value ?? 0,
     }))
-
-    const existingProgramText = (memoryState.instructionLines ?? [])
-      .map((line) => {
-        const label = line.label ? `${line.label}: ` : ''
-        return `${label}${line.text ?? ''}`.trim()
+    const existingProgram = Object.values(memoryState.instructionMemory)
+      .sort((a, b) => a.address - b.address)
+      .map((cell) => {
+        const prefix = cell.label ? `${cell.label}: ` : ''
+        return `${prefix}${cell.instruction}`.trim()
       })
       .filter(Boolean)
       .join('\n')
 
-    setVariables(existingVariables.length > 0 ? existingVariables : [{ name: '', type: 'int', initialValue: 0 }])
-    setProgramText(existingProgramText)
-  }, [memoryState.variables, memoryState.instructionLines])
+    if (existingVars.length > 0) setVariables(existingVars)
+    if (existingProgram) setProgramText(existingProgram)
+  }, []) // run once on mount
 
-  const handleStart = () => {
+  const handleStart = async () => {
+    setError(null)
     const validVariables = variables.filter((v) => v.name.trim() !== '')
-    const lines = programText
+    const instructionLines = programText
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line.length > 0)
       .map((line) => {
-        const match = line.match(/^([A-Za-z_]\w*):\s*(.*)$/)
-        if (match) {
-          return { label: match[1], text: match[2] }
-        }
+        const match = line.match(/^([A-Za-z_]\w*)\s*:\s*(.*)$/)
+        if (match) return { label: match[1], text: match[2].trim() }
         return { label: null, text: line }
       })
+      .filter((line) => line.text.length > 0)
 
-    dispatch(loadProgram({ variables: validVariables, instructionLines: lines }))
-    navigate('/simulation')
+    if (instructionLines.length === 0) {
+      setError('Please enter at least one instruction.')
+      return
+    }
+
+    setLoading(true)
+    try {
+      // Send to backend — it allocates memory and returns the full state
+      const state = await loadProgram({ instructionLines, variables: validVariables })
+
+      // Update Redux memory display state
+      dispatch(setMemoryState({
+        data_memory: state.data_memory,
+        instruction_memory: state.instruction_memory,
+      }))
+      dispatch(setStatus('ready'))
+      dispatch(resetCPUDisplay())
+
+      navigate('/simulation')
+    } catch (e) {
+      setError(e.message || 'Failed to load program. Is the backend running?')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const updateVariable = (index, field, value) => {
-    setVariables((prev) => prev.map((variable, currentIndex) => (currentIndex === index ? { ...variable, [field]: value } : variable)))
+    setVariables((prev) =>
+      prev.map((v, i) => (i === index ? { ...v, [field]: value } : v))
+    )
   }
 
   const addVariable = () => {
@@ -72,7 +102,7 @@ export function HomePage() {
   }
 
   const removeVariable = (index) => {
-    setVariables((prev) => prev.filter((_, currentIndex) => currentIndex !== index))
+    setVariables((prev) => prev.filter((_, i) => i !== index))
   }
 
   const panelClass = isLightMode
@@ -85,11 +115,16 @@ export function HomePage() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-6">
       <div className="max-w-4xl mx-auto space-y-8">
+
         <div className="flex justify-end pt-2">
           <Button
-            onClick={() => setIsLightMode((value) => !value)}
+            onClick={() => setIsLightMode((v) => !v)}
             variant="ghost"
-            className={isLightMode ? 'bg-white/80 text-slate-800 hover:bg-white' : 'bg-slate-800/70 text-white hover:bg-slate-700 border border-slate-600'}
+            className={
+              isLightMode
+                ? 'bg-white/80 text-slate-800 hover:bg-white'
+                : 'bg-slate-800/70 text-white hover:bg-slate-700 border border-slate-600'
+            }
           >
             Toggle Theme
           </Button>
@@ -97,7 +132,7 @@ export function HomePage() {
 
         {/* Title */}
         <div className="text-center space-y-2 pt-2">
-          <h1 className={`text-3xl font-bold ${isLightMode ? 'text-slate-100' : 'text-slate-100'}`}>
+          <h1 className="text-3xl font-bold text-slate-100">
             Assembly Program Execution Simulator
           </h1>
           <p className={subTextClass}>
@@ -105,10 +140,17 @@ export function HomePage() {
           </p>
         </div>
 
+        {/* Error banner */}
+        {error && (
+          <div className="px-4 py-3 rounded-xl bg-red-900/40 border border-red-700 text-red-300 text-sm">
+            {error}
+          </div>
+        )}
+
         {/* Data Panel */}
         <section className={`space-y-4 rounded-2xl border p-5 ${panelClass}`}>
           <div className="flex items-center justify-between">
-            <h2 className={`text-lg font-semibold ${headingClass}`}>Data Panel - Variables</h2>
+            <h2 className={`text-lg font-semibold ${headingClass}`}>Data Panel — Variables</h2>
             <Button onClick={addVariable} variant={isLightMode ? 'secondary' : 'ghost'}>
               + Add Variable
             </Button>
@@ -130,14 +172,14 @@ export function HomePage() {
         <section className={`space-y-4 rounded-2xl border p-5 ${panelClass}`}>
           <div className="flex items-center justify-between">
             <h2 className={`text-lg font-semibold ${headingClass}`}>
-              Instruction Panel - Program
+              Instruction Panel — Program
             </h2>
           </div>
           <div className="relative">
             <textarea
               value={programText}
               onChange={(e) => setProgramText(e.target.value)}
-              placeholder="Write your assembly program here..."
+              placeholder={'Write your assembly program here...\ne.g.\n  MOV R1, 10\n  MOV R2, 5\n  ADD R1, R2\n  HLT'}
               className="w-full min-h-[320px] resize-none rounded-xl border border-slate-700 bg-slate-950/90 p-4 font-mono text-sm text-slate-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             />
             <div className="pointer-events-none absolute right-4 top-4 text-xs text-slate-400">
@@ -148,8 +190,13 @@ export function HomePage() {
 
         {/* Start Button */}
         <div className="flex justify-center pb-8">
-          <Button onClick={handleStart} variant="primary" className="px-8 py-3 text-base">
-            Start Simulation →
+          <Button
+            onClick={handleStart}
+            variant="primary"
+            className="px-8 py-3 text-base"
+            disabled={loading}
+          >
+            {loading ? 'Loading...' : 'Start Simulation →'}
           </Button>
         </div>
       </div>

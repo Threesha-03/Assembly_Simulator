@@ -17,4 +17,8 @@ TYPE_BYTE_SIZE = {
     "WORD": 2,
     "DWORD": 4,
     "QWORD": 8,
+    "int": 4,
+    "float": 4,
+    "double": 8,
+    "boolean": 1,
 }

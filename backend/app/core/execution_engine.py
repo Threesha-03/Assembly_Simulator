@@ -1,161 +1,355 @@
 """
-execution_engine.py — Ties together decoder, ALU, register manager,
-and memory manager to execute one instruction at a time.
+execution_engine.py — Full instruction execution engine.
+Mirrors the logic that was previously in frontend/src/components/CPU/cpuSlice.js.
+Supports: MOV, LOAD, STORE, ADD, SUB, MUL, DIV, INC, DEC, JMP, JE, JNE, JG, JL, NOP, HLT
+Registers: R0–R15 + accumulator (ACC)
 """
 
-from app.core.instruction_decoder import InstructionDecoder
-from app.core.alu import ALU
-from app.core.register_manager import RegisterManager
-from app.core.memory_manager import MemoryManager
-from app.core.cpu_state import CPUStateManager
+import re
+import copy
+from typing import Optional
+from app.models.register import GENERAL_PURPOSE_REGISTERS
+
+
+INSTRUCTION_MEMORY_BASE = 4000
+INSTRUCTION_BYTE_SIZE = 8
+DATA_MEMORY_BASE = 1000
+
+
+def parse_address(s: str) -> Optional[int]:
+    """Parse '1000H', '0x1000', or '1000' to int. Returns None on failure."""
+    if not s:
+        return None
+    s = s.strip().upper()
+    if s.endswith("H"):
+        try:
+            return int(s[:-1], 16)
+        except ValueError:
+            return None
+    if s.startswith("0X"):
+        try:
+            return int(s[2:], 16)
+        except ValueError:
+            return None
+    try:
+        return int(s)
+    except ValueError:
+        return None
 
 
 class ExecutionEngine:
     """
-    Executes instructions step-by-step.
-    Architecture: CPU Engine -> Memory Manager -> Redux (via notification callbacks).
+    Manages full CPU + memory state and executes assembly instructions step-by-step.
+    State is held in-process (singleton via AppState).
     """
 
-    def __init__(self, memory_manager: MemoryManager):
-        self.memory = memory_manager
-        self.cpu = CPUStateManager()
-        self.decoder = InstructionDecoder()
-        self.alu = ALU()
-        self._label_map: dict[str, int] = {}
+    def __init__(self):
+        self._registers: dict[str, int] = {name: 0 for name in GENERAL_PURPOSE_REGISTERS}
+        self._accumulator: int = 0
+        self._program_counter: Optional[int] = None
+        self._instruction_register: str = ""
+        self._start_address: str = ""
+        self._status: str = "idle"          # idle | running | completed
+        self._history: list[dict] = []
 
-    def load_label_map(self, label_map: dict[str, int]) -> None:
-        """Pre-compute label -> address map for jump resolution."""
-        self._label_map = label_map
+        # Memory: address -> cell dict
+        self._instruction_memory: dict[int, dict] = {}  # {address, label, instruction}
+        self._data_memory: dict[int, dict] = {}          # {address, label, type, value}
+        self._label_map: dict[str, int] = {}             # label -> instruction address
+        self._initial_data_memory: dict[int, dict] = {}  # for reset
+
+    # ── Memory loading ────────────────────────────────────────────────────────
+
+    def load_program(self, instruction_lines: list[dict], variables: list[dict]) -> dict:
+        """
+        Allocate memory and build label map.
+        instruction_lines: [{ text, label? }]
+        variables:         [{ name, type, initialValue? or initial_value? }]
+        """
+        self._instruction_memory = {}
+        self._data_memory = {}
+        self._label_map = {}
+        self._history = []
+        self._status = "idle"
+        self._program_counter = None
+        self._instruction_register = ""
+
+        # Instruction memory — base 4000, stride 8
+        for i, line in enumerate(instruction_lines):
+            addr = INSTRUCTION_MEMORY_BASE + i * INSTRUCTION_BYTE_SIZE
+            label = line.get("label") or ""
+            text = line.get("text", "")
+            self._instruction_memory[addr] = {
+                "address": addr,
+                "label": label,
+                "instruction": text,
+            }
+            if label:
+                self._label_map[label] = addr
+
+        # Data memory — base 1000
+        TYPE_BYTE_SIZE = {"int": 4, "float": 4, "double": 8, "boolean": 1,
+                          "BYTE": 1, "WORD": 2, "DWORD": 4, "QWORD": 8}
+        cursor = DATA_MEMORY_BASE
+        for var in variables:
+            name = var.get("name", "")
+            vtype = var.get("type", "int")
+            # support both camelCase and snake_case
+            initial = var.get("initialValue", var.get("initial_value", 0))
+            self._data_memory[cursor] = {
+                "address": cursor,
+                "label": name,
+                "type": vtype,
+                "value": int(initial),
+            }
+            cursor += TYPE_BYTE_SIZE.get(vtype, 1)
+
+        # Deep-copy for reset
+        self._initial_data_memory = copy.deepcopy(self._data_memory)
+
+        return self._build_state()
+
+    # ── CPU controls ──────────────────────────────────────────────────────────
+
+    def set_start_address(self, addr_str: str) -> None:
+        self._start_address = addr_str
+
+    def run(self, start_address: str) -> dict:
+        """Load IR from start_address, set PC to next instruction."""
+        self._start_address = start_address
+        addr = parse_address(start_address)
+        if addr is None:
+            return {"error": "Invalid start address"}
+
+        self._history = []
+        cell = self._instruction_memory.get(addr)
+        self._instruction_register = cell["instruction"] if cell else "—"
+        self._program_counter = addr + INSTRUCTION_BYTE_SIZE
+        self._status = "running"
+
+        # Execute the first instruction immediately
+        self._history.append(self._snapshot())
+        self._apply_instruction(self._instruction_register)
+        if not self._instruction_memory.get(self._program_counter):
+            self._status = "completed"
+
+        return self._build_state()
 
     def step(self) -> dict:
-        """Execute the instruction at the current PC. Returns execution info."""
-        if self.cpu.state.is_halted:
-            return {"status": "halted"}
+        """Execute instruction at current PC, advance PC."""
+        if self._status == "completed":
+            return self._build_state()
 
-        cell = self.memory.get_instruction(self.cpu.state.program_counter)
+        pc = self._program_counter
+        if pc is None:
+            return {"error": "No program counter set. Call run first."}
+
+        cell = self._instruction_memory.get(pc)
         if not cell:
-            self.cpu.state.is_halted = True
-            return {"status": "halted", "reason": "No instruction at PC"}
+            self._status = "completed"
+            return self._build_state()
 
-        decoded = self.decoder.decode(cell.instruction)
-        self.cpu.state.instruction_register = cell.instruction
+        self._instruction_register = cell["instruction"]
+        self._history.append(self._snapshot())
 
-        result = self._execute(decoded)
+        # Advance PC before execution (so jumps can override it)
+        self._program_counter = pc + INSTRUCTION_BYTE_SIZE
+        self._apply_instruction(self._instruction_register)
 
-        # If no jump/branch occurred, advance PC normally
-        if not result.get("jumped"):
-            self.cpu.state.program_counter += 1
+        # Check if next instruction exists
+        if self._status != "completed" and not self._instruction_memory.get(self._program_counter):
+            self._status = "completed"
 
-        return {
-            "status": "ok",
-            "instruction": cell.instruction,
-            "program_counter": self.cpu.state.program_counter,
-            **result,
-        }
+        return self._build_state()
 
-    def _execute(self, decoded: dict) -> dict:
-        opcode = decoded["opcode"]
-        ops = decoded["operands"]
+    def previous(self) -> dict:
+        """Restore previous CPU + memory snapshot."""
+        if not self._history:
+            return self._build_state()
+        snap = self._history.pop()
+        self._registers = dict(snap["registers"])
+        self._accumulator = snap["accumulator"]
+        self._program_counter = snap["program_counter"]
+        self._instruction_register = snap["instruction_register"]
+        self._status = snap["status"]
+        self._data_memory = copy.deepcopy(snap["data_memory"])
+        return self._build_state()
 
-        if opcode == "HLT":
-            self.cpu.state.is_halted = True
-            return {"halted": True}
+    def reset(self) -> dict:
+        """Full reset — registers, accumulator, PC, memory back to initial."""
+        self._registers = {name: 0 for name in GENERAL_PURPOSE_REGISTERS}
+        self._accumulator = 0
+        self._program_counter = None
+        self._instruction_register = ""
+        self._start_address = ""
+        self._status = "idle"
+        self._history = []
+        self._data_memory = copy.deepcopy(self._initial_data_memory)
+        return self._build_state()
 
-        if opcode == "NOP":
-            return {}
+    # ── Instruction execution ─────────────────────────────────────────────────
 
-        if opcode == "MOV":
-            val = self._resolve_operand(ops[1])
-            self._write_operand(ops[0], val)
-            return {"moved": val}
+    def _apply_instruction(self, ir: str) -> None:
+        """Parse and execute one instruction string."""
+        if not ir or ir in ("—", "(end)"):
+            return
 
-        if opcode == "ADD":
-            a = self._resolve_operand(ops[0])
-            b = self._resolve_operand(ops[1])
-            result = self.alu.add(a, b)
-            self._write_operand(ops[0], result)
-            return {"result": result}
+        # Strip label prefix: "loop: ADD R1, 1" → "ADD R1, 1"
+        text = re.sub(r"^\s*[A-Za-z_]\w*\s*:\s*", "", ir).strip()
+        tokens = re.sub(r"[.,\[\]]", " ", text).strip().split()
+        if not tokens:
+            return
+        op = tokens[0].upper()
 
-        if opcode == "SUB":
-            a = self._resolve_operand(ops[0])
-            b = self._resolve_operand(ops[1])
-            result = self.alu.sub(a, b)
-            self._write_operand(ops[0], result)
-            return {"result": result}
-
-        if opcode == "MUL":
-            a = self._resolve_operand(ops[0])
-            b = self._resolve_operand(ops[1])
-            result = self.alu.mul(a, b)
-            self._write_operand(ops[0], result)
-            return {"result": result}
-
-        if opcode == "DIV":
-            a = self._resolve_operand(ops[0])
-            b = self._resolve_operand(ops[1])
-            result = self.alu.div(a, b)
-            self._write_operand(ops[0], result)
-            return {"result": result}
-
-        if opcode == "INC":
-            a = self._resolve_operand(ops[0])
-            self._write_operand(ops[0], self.alu.inc(a))
-            return {}
-
-        if opcode == "DEC":
-            a = self._resolve_operand(ops[0])
-            self._write_operand(ops[0], self.alu.dec(a))
-            return {}
-
-        if opcode == "LOAD":
-            addr = self._resolve_memory_ref(ops[1])
-            val = self.memory.read(addr)
-            self._write_operand(ops[0], val or 0)
-            return {"loaded": val}
-
-        if opcode == "STORE":
-            addr = self._resolve_memory_ref(ops[0])
-            val = self._resolve_operand(ops[1])
-            self.memory.write(addr, val)
-            return {"stored": val}
-
-        if opcode == "JMP":
-            target = self._resolve_label(ops[0])
-            if target is not None:
-                self.cpu.state.program_counter = target
-                return {"jumped": True}
-            return {}
-
-        return {}
-
-    def _resolve_operand(self, op: str) -> int:
-        op = op.strip()
-        if op.upper() in self.cpu.register_manager._registers:
-            return self.cpu.register_manager.read(op.upper())
-        try:
-            return int(op)
-        except ValueError:
-            return 0
-
-    def _write_operand(self, op: str, value: int) -> None:
-        op = op.strip().upper()
-        if op in self.cpu.register_manager._registers:
-            self.cpu.register_manager.write(op, value)
-
-    def _resolve_memory_ref(self, op: str) -> int:
-        """Resolves [label] or [address] to a numeric address."""
-        op = op.strip()
-        if op.startswith("[") and op.endswith("]"):
-            inner = op[1:-1].strip()
-            # If it's a label, look up the address from data memory
-            for addr, cell in self.memory._memory.data_memory.items():
-                if cell.label == inner:
-                    return addr
+        def get_val(tok: str) -> int:
+            if not tok:
+                return 0
+            t = tok.upper()
+            if re.match(r"^R\d+$", t):
+                return self._registers.get(t, 0)
+            if t == "ACC":
+                return self._accumulator
             try:
-                return int(inner, 16) if inner.endswith("H") else int(inner)
+                return int(tok)
             except ValueError:
                 return 0
-        return 0
 
-    def _resolve_label(self, label: str) -> int | None:
-        return self._label_map.get(label)
+        def set_dest(dest: str, val: int) -> None:
+            d = dest.upper()
+            if d == "ACC":
+                self._accumulator = val
+            elif re.match(r"^R\d+$", d):
+                self._registers[d] = val
+
+        def find_data_by_label(label: str) -> Optional[dict]:
+            for cell in self._data_memory.values():
+                if cell["label"].lower() == label.lower():
+                    return cell
+            return None
+
+        def find_instr_addr_by_label(label: str) -> Optional[int]:
+            return self._label_map.get(label)
+
+        if op == "HLT":
+            self._status = "completed"
+            return
+
+        if op == "NOP":
+            return
+
+        if op == "MOV":
+            if len(tokens) >= 3:
+                set_dest(tokens[1], get_val(tokens[2]))
+            return
+
+        if op == "LOAD":
+            # LOAD Rx, [label]  or  LOAD Rx, label
+            if len(tokens) >= 3:
+                cell = find_data_by_label(tokens[2])
+                val = cell["value"] if cell else 0
+                set_dest(tokens[1], val)
+            return
+
+        if op == "STORE":
+            # STORE [label], Rx|ACC
+            if len(tokens) >= 3:
+                cell = find_data_by_label(tokens[1])
+                if cell:
+                    cell["value"] = get_val(tokens[2])
+            return
+
+        if op == "ADD":
+            if len(tokens) >= 3:
+                result = get_val(tokens[1]) + get_val(tokens[2])
+                set_dest(tokens[1], result)
+            return
+
+        if op == "SUB":
+            if len(tokens) >= 3:
+                result = get_val(tokens[1]) - get_val(tokens[2])
+                set_dest(tokens[1], result)
+            return
+
+        if op == "MUL":
+            if len(tokens) >= 3:
+                result = get_val(tokens[1]) * get_val(tokens[2])
+                set_dest(tokens[1], result)
+            return
+
+        if op == "DIV":
+            if len(tokens) >= 3:
+                divisor = get_val(tokens[2])
+                result = get_val(tokens[1]) // divisor if divisor != 0 else 0
+                set_dest(tokens[1], result)
+            return
+
+        if op == "INC":
+            if len(tokens) >= 2:
+                set_dest(tokens[1], get_val(tokens[1]) + 1)
+            return
+
+        if op == "DEC":
+            if len(tokens) >= 2:
+                set_dest(tokens[1], get_val(tokens[1]) - 1)
+            return
+
+        if op == "JMP":
+            if len(tokens) >= 2:
+                addr = find_instr_addr_by_label(tokens[1])
+                if addr is not None:
+                    self._program_counter = addr
+            return
+
+        if op in ("JE", "JNE", "JG", "JL"):
+            if len(tokens) >= 3:
+                reg_val = get_val(tokens[1])
+                # Support both `JG R1, 0, loop` and `JG R1, loop`
+                if len(tokens) >= 4:
+                    cmp_val = get_val(tokens[2])
+                    target = tokens[3]
+                else:
+                    cmp_val = 0
+                    target = tokens[2]
+                addr = find_instr_addr_by_label(target)
+                if addr is None:
+                    return
+                should_jump = False
+                if op == "JE":  should_jump = reg_val == cmp_val
+                if op == "JNE": should_jump = reg_val != cmp_val
+                if op == "JG":  should_jump = reg_val > cmp_val
+                if op == "JL":  should_jump = reg_val < cmp_val
+                if should_jump:
+                    self._program_counter = addr
+            return
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _snapshot(self) -> dict:
+        return {
+            "registers": dict(self._registers),
+            "accumulator": self._accumulator,
+            "program_counter": self._program_counter,
+            "instruction_register": self._instruction_register,
+            "status": self._status,
+            "data_memory": copy.deepcopy(self._data_memory),
+        }
+
+    def _build_state(self) -> dict:
+        """Return the full serialisable state sent to the frontend."""
+        return {
+            "registers": [{"name": k, "value": v} for k, v in self._registers.items()],
+            "accumulator": self._accumulator,
+            "program_counter": self._program_counter,
+            "instruction_register": self._instruction_register,
+            "start_address": self._start_address,
+            "status": self._status,
+            "can_go_back": len(self._history) > 0,
+            "instruction_memory": list(self._instruction_memory.values()),
+            "data_memory": list(self._data_memory.values()),
+        }
+
+    def get_state(self) -> dict:
+        return self._build_state()
+
+    def is_loaded(self) -> bool:
+        return bool(self._instruction_memory)

@@ -44,7 +44,7 @@ export function DataRow({ variable, onChange, onRemove, isLightMode = false }) {
       <Input
         label="Initial Value"
         type="number"
-        value={variable.initialValue ?? 0}
+        value={variable.initialValue === 0 ? '' : variable.initialValue}
         onChange={(e) => onChange('initialValue', Number(e.target.value || 0))}
         placeholder="0"
         className="w-32"

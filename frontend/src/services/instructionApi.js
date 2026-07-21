@@ -30,6 +30,17 @@ export async function loadProgram(payload) {
       })),
     }),
   })
-  if (!res.ok) throw new Error('Failed to load program')
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    // 422 = syntax errors from backend validator
+    if (res.status === 422 && body.detail?.syntax_errors) {
+      const err = new Error('SYNTAX_ERRORS')
+      err.syntaxErrors = body.detail.syntax_errors
+      throw err
+    }
+    throw new Error(body.detail || 'Failed to load program')
+  }
+
   return res.json()
 }

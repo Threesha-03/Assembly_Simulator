@@ -28,6 +28,7 @@ export function HomePage() {
   const [variables, setVariables] = useState([{ name: '', type: 'int', initialValue: 0 }])
   const [programText, setProgramText] = useState('')
   const [error, setError] = useState(null)
+  const [syntaxErrors, setSyntaxErrors] = useState([])
   const [loading, setLoading] = useState(false)
 
   // Restore form state if user navigates back from simulation
@@ -53,6 +54,7 @@ export function HomePage() {
 
   const handleStart = async () => {
     setError(null)
+    setSyntaxErrors([])
     const validVariables = variables.filter((v) => v.name.trim() !== '')
     const instructionLines = programText
       .split('\n')
@@ -72,20 +74,20 @@ export function HomePage() {
 
     setLoading(true)
     try {
-      // Send to backend — it allocates memory and returns the full state
       const state = await loadProgram({ instructionLines, variables: validVariables })
-
-      // Update Redux memory display state
       dispatch(setMemoryState({
         data_memory: state.data_memory,
         instruction_memory: state.instruction_memory,
       }))
       dispatch(setStatus('ready'))
       dispatch(resetCPUDisplay())
-
       navigate('/simulation')
     } catch (e) {
-      setError(e.message || 'Failed to load program. Is the backend running?')
+      if (e.message === 'SYNTAX_ERRORS' && e.syntaxErrors) {
+        setSyntaxErrors(e.syntaxErrors)
+      } else {
+        setError(e.message || 'Failed to load program. Is the backend running?')
+      }
     } finally {
       setLoading(false)
     }
@@ -140,10 +142,39 @@ export function HomePage() {
           </p>
         </div>
 
-        {/* Error banner */}
+        {/* General error banner */}
         {error && (
           <div className="px-4 py-3 rounded-xl bg-red-900/40 border border-red-700 text-red-300 text-sm">
-            {error}
+            ⚠ {error}
+          </div>
+        )}
+
+        {/* Syntax error list */}
+        {syntaxErrors.length > 0 && (
+          <div className="rounded-xl border border-red-700 bg-red-900/30 overflow-hidden">
+            <div className="px-4 py-2 bg-red-800/50 flex items-center gap-2">
+              <span className="text-red-300 font-bold text-sm">
+                ✕ {syntaxErrors.length} Syntax Error{syntaxErrors.length > 1 ? 's' : ''} Found
+              </span>
+              <span className="text-red-400 text-xs">— Fix them before starting simulation</span>
+            </div>
+            <div className="divide-y divide-red-800/50">
+              {syntaxErrors.map((err, idx) => (
+                <div key={idx} className="px-4 py-2 flex items-start gap-3">
+                  <span className="shrink-0 mt-0.5 px-2 py-0.5 rounded bg-red-800/60 text-red-300 font-mono text-xs font-bold">
+                    Line {err.line}
+                  </span>
+                  <div className="flex flex-col gap-0.5 min-w-0">
+                    <span className="font-mono text-xs text-red-200 truncate">
+                      {err.instruction}
+                    </span>
+                    <span className="text-xs text-red-400">
+                      {err.error}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 from app.core.app_state import engine
+from app.core.parser import validate_program
 
 router = APIRouter()
 
@@ -36,10 +37,19 @@ async def get_instructions():
 @router.post("/load")
 async def load_program(payload: LoadProgramRequest):
     """
-    Load variables + instructions into the execution engine.
-    Allocates memory addresses and resets CPU state.
+    Validate, then load variables + instructions into the execution engine.
+    Returns 422 with error list if syntax errors are found.
     """
     instruction_lines = [{"text": i.text, "label": i.label} for i in payload.instruction_lines]
     variables = [{"name": v.name, "type": v.type, "initialValue": v.initialValue} for v in payload.variables]
+
+    # Validate syntax before loading
+    errors = validate_program(instruction_lines)
+    if errors:
+        raise HTTPException(
+            status_code=422,
+            detail={"syntax_errors": errors}
+        )
+
     state = engine.load_program(instruction_lines, variables)
     return state

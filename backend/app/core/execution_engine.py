@@ -51,6 +51,7 @@ class ExecutionEngine:
         self._start_address: str = ""
         self._status: str = "idle"          # idle | running | completed
         self._history: list[dict] = []
+        self._flags: dict[str, int] = {"cmp_left": 0, "cmp_right": 0, "cmp_done": 0}
 
         # Memory: address -> cell dict
         self._instruction_memory: dict[int, dict] = {}  # {address, label, instruction}
@@ -88,8 +89,7 @@ class ExecutionEngine:
                 self._label_map[label] = addr
 
         # Data memory — base 1000
-        TYPE_BYTE_SIZE = {"int": 4, "float": 4, "double": 8, "boolean": 1,
-                          "BYTE": 1, "WORD": 2, "DWORD": 4, "QWORD": 8}
+        TYPE_BYTE_SIZE = {"int": 4, "float": 4, "double": 8, "boolean": 1}
         cursor = DATA_MEMORY_BASE
         for var in variables:
             name = var.get("name", "")
@@ -172,6 +172,7 @@ class ExecutionEngine:
         self._program_counter = snap["program_counter"]
         self._instruction_register = snap["instruction_register"]
         self._status = snap["status"]
+        self._flags = dict(snap.get("flags", {"cmp_left": 0, "cmp_right": 0, "cmp_done": 0}))
         self._data_memory = copy.deepcopy(snap["data_memory"])
         return self._build_state()
 
@@ -184,6 +185,7 @@ class ExecutionEngine:
         self._start_address = ""
         self._status = "idle"
         self._history = []
+        self._flags = {"cmp_left": 0, "cmp_right": 0, "cmp_done": 0}
         self._data_memory = copy.deepcopy(self._initial_data_memory)
         return self._build_state()
 
@@ -293,6 +295,14 @@ class ExecutionEngine:
                 set_dest(tokens[1], get_val(tokens[1]) - 1)
             return
 
+        if op == "CMP":
+            # CMP Ra, Rb — sets flags for subsequent JE/JNE/JG/JL
+            if len(tokens) >= 3:
+                self._flags["cmp_left"] = get_val(tokens[1])
+                self._flags["cmp_right"] = get_val(tokens[2])
+                self._flags["cmp_done"] = 1
+            return
+
         if op == "JMP":
             if len(tokens) >= 2:
                 addr = find_instr_addr_by_label(tokens[1])
@@ -301,25 +311,35 @@ class ExecutionEngine:
             return
 
         if op in ("JE", "JNE", "JG", "JL"):
-            if len(tokens) >= 3:
-                reg_val = get_val(tokens[1])
-                # Support both `JG R1, 0, loop` and `JG R1, loop`
+            # If preceded by CMP, use flags; otherwise use inline operands
+            if self._flags.get("cmp_done") and len(tokens) == 2:
+                # Form: JG label  (uses CMP flags)
+                left  = self._flags["cmp_left"]
+                right = self._flags["cmp_right"]
+                target = tokens[1]
+                self._flags["cmp_done"] = 0  # consume the flag
+            elif len(tokens) >= 3:
+                # Form: JG R1, R2, label  or  JG R1, label
+                left = get_val(tokens[1])
                 if len(tokens) >= 4:
-                    cmp_val = get_val(tokens[2])
+                    right  = get_val(tokens[2])
                     target = tokens[3]
                 else:
-                    cmp_val = 0
+                    right  = 0
                     target = tokens[2]
-                addr = find_instr_addr_by_label(target)
-                if addr is None:
-                    return
-                should_jump = False
-                if op == "JE":  should_jump = reg_val == cmp_val
-                if op == "JNE": should_jump = reg_val != cmp_val
-                if op == "JG":  should_jump = reg_val > cmp_val
-                if op == "JL":  should_jump = reg_val < cmp_val
-                if should_jump:
-                    self._program_counter = addr
+            else:
+                return
+
+            addr = find_instr_addr_by_label(target)
+            if addr is None:
+                return
+            should_jump = False
+            if op == "JE":  should_jump = left == right
+            if op == "JNE": should_jump = left != right
+            if op == "JG":  should_jump = left > right
+            if op == "JL":  should_jump = left < right
+            if should_jump:
+                self._program_counter = addr
             return
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -331,6 +351,7 @@ class ExecutionEngine:
             "program_counter": self._program_counter,
             "instruction_register": self._instruction_register,
             "status": self._status,
+            "flags": dict(self._flags),
             "data_memory": copy.deepcopy(self._data_memory),
         }
 

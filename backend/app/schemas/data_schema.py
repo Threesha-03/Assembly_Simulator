@@ -5,7 +5,7 @@ data_schema.py — Pydantic schemas for data/variable API payloads.
 from pydantic import BaseModel
 from typing import Literal, Optional
 
-DataType = Literal["BYTE", "WORD", "DWORD", "QWORD", "int", "float", "double", "boolean"]
+DataType = Literal[ "int", "float", "double", "boolean"]
 
 
 class VariableCreate(BaseModel):

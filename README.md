@@ -49,6 +49,20 @@ assembly-program-execution-simulator/
 └── sample-programs/        # Example assembly programs
 ```
 
+## 📸 Screenshots
+
+### 📝 Input Panel
+
+<p align="center">
+  <img src="./inputPanel.png" alt="Input Panel" width="800">
+</p>
+
+### ⚙️ Simulation Page
+
+<p align="center">
+  <img src="./simulationPage.png" alt="Simulation Page" width="800">
+</p>
+
 ## Getting Started
 
 ### Frontend Setup
